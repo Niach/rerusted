@@ -1,0 +1,199 @@
+{
+  "$comment": "Rerusted design tokens: the single source of truth for the palette, control geometry, radii, spacing and type scale. Structure taken from Exponential's packages/design-tokens/tokens.json; the neutral ramp is replaced by the rusted one (hue around 35, low chroma) and the rust accent is added (#RUST-5, approved in #RUST-15). Colours are authored in OKLCH only. `cargo run --manifest-path design/tools/Cargo.toml` writes design/generated/ (sRGB hex, contrast report, swatch sheet) and design/logo/; never transcribe a colour by hand. Dark only for now; a light theme is derived later from the same hue.",
+  "palette": {
+    "$comment": "Values from the #RUST-5 token table. popover, sidebar = card; secondary, sidebarAccent = muted; sidebarBorder = border; every *Foreground = foreground, as in Exponential. `accent` is the rust colour (in Exponential it was a hover surface; that role is `muted` here). primary, input, ring and destructive are the #RUST-15 plan values. The accent reaches 3:1 on background, not 4.5:1: it is for fills, icons and large text, never body text.",
+    "background": {
+      "oklch": "oklch(0.145 0.012 35)",
+      "hex": "#0f0807"
+    },
+    "foreground": {
+      "oklch": "oklch(0.985 0.004 60)",
+      "hex": "#fcf9f7"
+    },
+    "card": {
+      "oklch": "oklch(0.205 0.016 35)",
+      "hex": "#1e1512"
+    },
+    "cardForeground": {
+      "oklch": "oklch(0.985 0.004 60)",
+      "hex": "#fcf9f7"
+    },
+    "popover": {
+      "oklch": "oklch(0.205 0.016 35)",
+      "hex": "#1e1512"
+    },
+    "popoverForeground": {
+      "oklch": "oklch(0.985 0.004 60)",
+      "hex": "#fcf9f7"
+    },
+    "primary": {
+      "oklch": "oklch(0.922 0.008 50)",
+      "hex": "#eae4e1"
+    },
+    "primaryForeground": {
+      "oklch": "oklch(0.205 0.016 35)",
+      "hex": "#1e1512"
+    },
+    "secondary": {
+      "oklch": "oklch(0.269 0.02 35)",
+      "hex": "#2f2320"
+    },
+    "secondaryForeground": {
+      "oklch": "oklch(0.985 0.004 60)",
+      "hex": "#fcf9f7"
+    },
+    "muted": {
+      "oklch": "oklch(0.269 0.02 35)",
+      "hex": "#2f2320"
+    },
+    "mutedForeground": {
+      "oklch": "oklch(0.708 0.03 40)",
+      "hex": "#b29b93"
+    },
+    "accent": {
+      "oklch": "oklch(0.56 0.15 42)",
+      "hex": "#ba4f1f"
+    },
+    "accentForeground": {
+      "oklch": "oklch(0.985 0.004 60)",
+      "hex": "#fcf9f7"
+    },
+    "destructive": {
+      "oklch": "oklch(0.704 0.191 22.216)",
+      "hex": "#ff6467"
+    },
+    "border": {
+      "oklch": "oklch(0.42 0.04 36)",
+      "hex": "#61463e"
+    },
+    "input": {
+      "oklch": "oklch(0.42 0.04 36)",
+      "hex": "#61463e"
+    },
+    "ring": {
+      "oklch": "oklch(0.56 0.15 42)",
+      "hex": "#ba4f1f"
+    },
+    "sidebar": {
+      "oklch": "oklch(0.205 0.016 35)",
+      "hex": "#1e1512"
+    },
+    "sidebarForeground": {
+      "oklch": "oklch(0.985 0.004 60)",
+      "hex": "#fcf9f7"
+    },
+    "sidebarAccent": {
+      "oklch": "oklch(0.269 0.02 35)",
+      "hex": "#2f2320"
+    },
+    "sidebarBorder": {
+      "oklch": "oklch(0.42 0.04 36)",
+      "hex": "#61463e"
+    }
+  },
+  "radius": {
+    "$comment": "Taken unchanged from Exponential. xl2/xl3 because 2xl/3xl are not valid identifiers in every target.",
+    "sm": 8,
+    "md": 10,
+    "lg": 12,
+    "xl": 16,
+    "xl2": 20,
+    "xl3": 24
+  },
+  "size": {
+    "$comment": "Control geometry in px, taken unchanged from Exponential.",
+    "controlLg": 36,
+    "controlMd": 32,
+    "controlSm": 24,
+    "inputHeight": 36,
+    "rowHeight": 32
+  },
+  "spacing": {
+    "$comment": "The one spacing scale in px, taken unchanged from Exponential.",
+    "xxs": 2,
+    "xs": 4,
+    "sm": 8,
+    "md": 12,
+    "lg": 16,
+    "xl": 24,
+    "xl2": 32
+  },
+  "type": {
+    "$comment": "Type, taken unchanged from Exponential: family, base size, size/lineHeight pairs in px, weights, and the text opacity ladder over foreground.",
+    "fontFamily": "Inter",
+    "baseSize": 16,
+    "size": {
+      "xs": 12,
+      "sm": 14,
+      "base": 16,
+      "lg": 18,
+      "xl": 20,
+      "xl2": 24
+    },
+    "lineHeight": {
+      "xs": 16,
+      "sm": 20,
+      "base": 24,
+      "lg": 28,
+      "xl": 28,
+      "xl2": 32
+    },
+    "weight": {
+      "regular": 400,
+      "medium": 500,
+      "semibold": 600,
+      "bold": 700
+    },
+    "emphasis": {
+      "primary": 1.0,
+      "secondary": 0.7,
+      "tertiary": 0.5,
+      "quaternary": 0.3
+    }
+  },
+  "contrast": {
+    "$comment": "WCAG 2.x checks run by the generator; it fails when a pair is below its minimum. 4.5 = AA text, 3.0 = AA for UI components and large text.",
+    "checks": [
+      {
+        "fg": "foreground",
+        "bg": "background",
+        "min": 4.5
+      },
+      {
+        "fg": "foreground",
+        "bg": "card",
+        "min": 4.5
+      },
+      {
+        "fg": "foreground",
+        "bg": "muted",
+        "min": 4.5
+      },
+      {
+        "fg": "mutedForeground",
+        "bg": "background",
+        "min": 4.5
+      },
+      {
+        "fg": "mutedForeground",
+        "bg": "card",
+        "min": 4.5
+      },
+      {
+        "fg": "mutedForeground",
+        "bg": "muted",
+        "min": 4.5
+      },
+      {
+        "fg": "accent",
+        "bg": "background",
+        "min": 3.0
+      },
+      {
+        "fg": "accentForeground",
+        "bg": "accent",
+        "min": 4.5
+      }
+    ]
+  }
+}
