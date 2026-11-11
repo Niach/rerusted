@@ -1,0 +1,271 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Manifest",
+  "description": "A widget manifest: the root widget of a tree plus its id.",
+  "type": "object",
+  "properties": {
+    "id": {
+      "$ref": "#/$defs/WidgetId"
+    },
+    "widget": {
+      "$ref": "#/$defs/Widget"
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "id",
+    "widget"
+  ],
+  "$defs": {
+    "Body": {
+      "description": "What a widget is made of.",
+      "oneOf": [
+        {
+          "description": "An axiom, implemented in Rust. `config` is opaque in phase 0.",
+          "type": "object",
+          "properties": {
+            "primitive": {
+              "type": "object",
+              "properties": {
+                "config": true,
+                "kind": {
+                  "$ref": "#/$defs/Kind"
+                }
+              },
+              "additionalProperties": false,
+              "required": [
+                "kind"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "primitive"
+          ]
+        },
+        {
+          "description": "Data only: children and the wires between them.",
+          "type": "object",
+          "properties": {
+            "compose": {
+              "type": "object",
+              "properties": {
+                "children": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "default": {},
+                  "patternProperties": {
+                    "^[a-z][a-z0-9_]{0,63}$": {
+                      "$ref": "#/$defs/Widget"
+                    }
+                  }
+                },
+                "wires": {
+                  "type": "array",
+                  "default": [],
+                  "items": {
+                    "$ref": "#/$defs/Wire"
+                  }
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "compose"
+          ]
+        }
+      ]
+    },
+    "Endpoint": {
+      "description": "One end of a wire: `self.in.<port>`, `<child>.out.<port>` and so on.",
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_]{0,63}\\.(in|out)\\.[a-z][a-z0-9_]{0,63}$"
+    },
+    "Kind": {
+      "description": "The primitive kinds.",
+      "oneOf": [
+        {
+          "type": "string",
+          "enum": [
+            "view",
+            "expr",
+            "state",
+            "egress",
+            "secrets",
+            "consent",
+            "agent",
+            "code",
+            "process"
+          ]
+        },
+        {
+          "description": "Every `system.*` provider; which one is named in `config`.",
+          "type": "string",
+          "const": "system"
+        }
+      ]
+    },
+    "Label": {
+      "description": "An origin label, per provider: `[a-z][a-z0-9_-]*`, matched exactly.",
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_-]*$"
+    },
+    "Port": {
+      "description": "A port: its kind plus label declarations.",
+      "type": "object",
+      "properties": {
+        "accepts": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "$ref": "#/$defs/Label"
+          },
+          "uniqueItems": true
+        },
+        "adds": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Label"
+          },
+          "uniqueItems": true
+        },
+        "depends_on": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "$ref": "#/$defs/PortName"
+          },
+          "uniqueItems": true
+        },
+        "input": {
+          "description": "`call` only: the argument type.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Schema"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "kind": {
+          "$ref": "#/$defs/PortKindTag"
+        },
+        "optional": {
+          "type": "boolean"
+        },
+        "output": {
+          "description": "`call` only: the result type.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Schema"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "schema": {
+          "description": "`data` only.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Schema"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "kind"
+      ]
+    },
+    "PortKindTag": {
+      "description": "A port kind without its schemas.",
+      "type": "string",
+      "enum": [
+        "data",
+        "call",
+        "view"
+      ]
+    },
+    "PortName": {
+      "description": "The name of a port on a widget.",
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_]{0,63}$"
+    },
+    "Schema": {
+      "description": "A type name. Two schemas match only if the strings are equal.",
+      "type": "string"
+    },
+    "Widget": {
+      "description": "Something between an app and a component: ports plus a body.",
+      "type": "object",
+      "properties": {
+        "body": {
+          "$ref": "#/$defs/Body"
+        },
+        "in": {
+          "type": "object",
+          "additionalProperties": false,
+          "patternProperties": {
+            "^[a-z][a-z0-9_]{0,63}$": {
+              "$ref": "#/$defs/Port"
+            }
+          }
+        },
+        "out": {
+          "type": "object",
+          "additionalProperties": false,
+          "patternProperties": {
+            "^[a-z][a-z0-9_]{0,63}$": {
+              "$ref": "#/$defs/Port"
+            }
+          }
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "body"
+      ]
+    },
+    "WidgetId": {
+      "description": "A widget manifest.",
+      "type": "string",
+      "format": "uuid"
+    },
+    "Wire": {
+      "description": "A wire inside a compose scope.",
+      "type": "object",
+      "properties": {
+        "allow": {
+          "description": "Labels the scope owner lets through this wire. They are removed from the flow here.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Label"
+          },
+          "uniqueItems": true
+        },
+        "from": {
+          "$ref": "#/$defs/Endpoint"
+        },
+        "to": {
+          "$ref": "#/$defs/Endpoint"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "from",
+        "to"
+      ]
+    }
+  }
+}

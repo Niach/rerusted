@@ -1,0 +1,87 @@
+{
+  "id": "0193a1c2-7d4e-7b3e-9f10-2d4c6a8b0e13",
+  "widget": {
+    "out": {
+      "window": {
+        "kind": "view"
+      },
+      "assistant": {
+        "kind": "view"
+      }
+    },
+    "body": {
+      "compose": {
+        "children": {
+          "photocraft": {
+            "out": {
+              "open": {
+                "kind": "call",
+                "input": "photocraft.path",
+                "output": "photocraft.document"
+              },
+              "export": {
+                "kind": "call",
+                "input": "photocraft.export",
+                "output": "photocraft.path"
+              },
+              "window": {
+                "kind": "view"
+              }
+            },
+            "body": {
+              "primitive": {
+                "kind": "process",
+                "config": {
+                  "command": "photocraft",
+                  "adapter": "mcp"
+                }
+              }
+            }
+          },
+          "assistant": {
+            "in": {
+              "open": {
+                "kind": "call",
+                "input": "photocraft.path",
+                "output": "photocraft.document"
+              },
+              "export": {
+                "kind": "call",
+                "input": "photocraft.export",
+                "output": "photocraft.path"
+              }
+            },
+            "out": {
+              "view": {
+                "kind": "view"
+              }
+            },
+            "body": {
+              "primitive": {
+                "kind": "agent"
+              }
+            }
+          }
+        },
+        "wires": [
+          {
+            "from": "photocraft.out.open",
+            "to": "assistant.in.open"
+          },
+          {
+            "from": "photocraft.out.export",
+            "to": "assistant.in.export"
+          },
+          {
+            "from": "photocraft.out.window",
+            "to": "self.out.window"
+          },
+          {
+            "from": "assistant.out.view",
+            "to": "self.out.assistant"
+          }
+        ]
+      }
+    }
+  }
+}
