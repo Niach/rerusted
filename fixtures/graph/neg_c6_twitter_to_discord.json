@@ -1,0 +1,236 @@
+{
+  "id": "0193a1c2-7d4e-7b3e-9f10-2d4c6a8b0e11",
+  "widget": {
+    "out": {
+      "view": {
+        "kind": "view"
+      }
+    },
+    "body": {
+      "compose": {
+        "children": {
+          "secrets": {
+            "out": {
+              "twitter": {
+                "kind": "call",
+                "input": "secret.request",
+                "output": "secret.signed",
+                "depends_on": []
+              },
+              "discord": {
+                "kind": "call",
+                "input": "secret.request",
+                "output": "secret.signed",
+                "depends_on": []
+              }
+            },
+            "body": {
+              "primitive": {
+                "kind": "secrets"
+              }
+            }
+          },
+          "twitter": {
+            "in": {
+              "auth": {
+                "kind": "call",
+                "input": "secret.request",
+                "output": "secret.signed",
+                "adds": [
+                  "twitter"
+                ],
+                "accepts": [
+                  "twitter"
+                ],
+                "depends_on": []
+              }
+            },
+            "out": {
+              "posts": {
+                "kind": "data",
+                "schema": "list<twitter.post>",
+                "adds": [
+                  "twitter"
+                ]
+              }
+            },
+            "body": {
+              "primitive": {
+                "kind": "egress",
+                "config": {
+                  "host": "api.twitter.com"
+                }
+              }
+            }
+          },
+          "feed": {
+            "in": {
+              "posts": {
+                "kind": "data",
+                "schema": "list<twitter.post>"
+              }
+            },
+            "out": {
+              "view": {
+                "kind": "view"
+              }
+            },
+            "body": {
+              "compose": {
+                "children": {
+                  "sort": {
+                    "in": {
+                      "items": {
+                        "kind": "data",
+                        "schema": "list<twitter.post>"
+                      }
+                    },
+                    "out": {
+                      "items": {
+                        "kind": "data",
+                        "schema": "list<twitter.post>"
+                      }
+                    },
+                    "body": {
+                      "primitive": {
+                        "kind": "expr",
+                        "config": {
+                          "sort": "created_at desc"
+                        }
+                      }
+                    }
+                  },
+                  "log": {
+                    "in": {
+                      "value": {
+                        "kind": "data",
+                        "schema": "list<twitter.post>"
+                      }
+                    },
+                    "out": {
+                      "value": {
+                        "kind": "data",
+                        "schema": "list<twitter.post>"
+                      }
+                    },
+                    "body": {
+                      "primitive": {
+                        "kind": "state"
+                      }
+                    }
+                  },
+                  "list": {
+                    "in": {
+                      "rows": {
+                        "kind": "data",
+                        "schema": "list<twitter.post>"
+                      }
+                    },
+                    "out": {
+                      "view": {
+                        "kind": "view"
+                      }
+                    },
+                    "body": {
+                      "primitive": {
+                        "kind": "view",
+                        "config": {
+                          "a2ui": {
+                            "component": "List",
+                            "props": {
+                              "items": "$rows"
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
+                "wires": [
+                  {
+                    "from": "self.in.posts",
+                    "to": "sort.in.items"
+                  },
+                  {
+                    "from": "sort.out.items",
+                    "to": "log.in.value"
+                  },
+                  {
+                    "from": "log.out.value",
+                    "to": "list.in.rows"
+                  },
+                  {
+                    "from": "list.out.view",
+                    "to": "self.out.view"
+                  }
+                ]
+              }
+            }
+          },
+          "discord": {
+            "in": {
+              "auth": {
+                "kind": "call",
+                "input": "secret.request",
+                "output": "secret.signed",
+                "adds": [
+                  "discord"
+                ],
+                "accepts": [
+                  "discord"
+                ],
+                "depends_on": []
+              },
+              "body": {
+                "kind": "data",
+                "schema": "list<twitter.post>",
+                "accepts": [
+                  "discord"
+                ]
+              }
+            },
+            "out": {
+              "status": {
+                "kind": "data",
+                "schema": "discord.status",
+                "adds": [
+                  "discord"
+                ]
+              }
+            },
+            "body": {
+              "primitive": {
+                "kind": "egress",
+                "config": {
+                  "host": "discord.com"
+                }
+              }
+            }
+          }
+        },
+        "wires": [
+          {
+            "from": "secrets.out.twitter",
+            "to": "twitter.in.auth"
+          },
+          {
+            "from": "twitter.out.posts",
+            "to": "feed.in.posts"
+          },
+          {
+            "from": "feed.out.view",
+            "to": "self.out.view"
+          },
+          {
+            "from": "secrets.out.discord",
+            "to": "discord.in.auth"
+          },
+          {
+            "from": "twitter.out.posts",
+            "to": "discord.in.body"
+          }
+        ]
+      }
+    }
+  }
+}

@@ -1,0 +1,165 @@
+{
+  "id": "0193a1c2-7d4e-7b3e-9f10-2d4c6a8b0e12",
+  "widget": {
+    "out": {
+      "sidebar": {
+        "kind": "view"
+      }
+    },
+    "body": {
+      "compose": {
+        "children": {
+          "secrets": {
+            "out": {
+              "github": {
+                "kind": "call",
+                "input": "secret.request",
+                "output": "secret.signed",
+                "depends_on": []
+              }
+            },
+            "body": {
+              "primitive": {
+                "kind": "secrets"
+              }
+            }
+          },
+          "forge": {
+            "in": {
+              "auth": {
+                "kind": "call",
+                "input": "secret.request",
+                "output": "secret.signed",
+                "adds": [
+                  "github"
+                ],
+                "accepts": [
+                  "github"
+                ],
+                "depends_on": []
+              }
+            },
+            "out": {
+              "repos": {
+                "kind": "call",
+                "input": "forge.repo_query",
+                "output": "list<forge.repo>",
+                "adds": [
+                  "github"
+                ],
+                "accepts": [
+                  "github"
+                ]
+              },
+              "commits": {
+                "kind": "call",
+                "input": "forge.commit_query",
+                "output": "list<forge.commit>",
+                "adds": [
+                  "github"
+                ],
+                "accepts": [
+                  "github"
+                ]
+              }
+            },
+            "body": {
+              "primitive": {
+                "kind": "egress",
+                "config": {
+                  "host": "api.github.com"
+                }
+              }
+            }
+          },
+          "git_activity": {
+            "in": {
+              "repos": {
+                "kind": "call",
+                "input": "forge.repo_query",
+                "output": "list<forge.repo>"
+              },
+              "commits": {
+                "kind": "call",
+                "input": "forge.commit_query",
+                "output": "list<forge.commit>"
+              }
+            },
+            "out": {
+              "view": {
+                "kind": "view"
+              }
+            },
+            "body": {
+              "compose": {
+                "children": {
+                  "list": {
+                    "in": {
+                      "repos": {
+                        "kind": "call",
+                        "input": "forge.repo_query",
+                        "output": "list<forge.repo>"
+                      },
+                      "commits": {
+                        "kind": "call",
+                        "input": "forge.commit_query",
+                        "output": "list<forge.commit>"
+                      }
+                    },
+                    "out": {
+                      "view": {
+                        "kind": "view"
+                      }
+                    },
+                    "body": {
+                      "primitive": {
+                        "kind": "view",
+                        "config": {
+                          "a2ui": {
+                            "component": "List"
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
+                "wires": [
+                  {
+                    "from": "self.in.repos",
+                    "to": "list.in.repos"
+                  },
+                  {
+                    "from": "self.in.commits",
+                    "to": "list.in.commits"
+                  },
+                  {
+                    "from": "list.out.view",
+                    "to": "self.out.view"
+                  }
+                ]
+              }
+            }
+          }
+        },
+        "wires": [
+          {
+            "from": "secrets.out.github",
+            "to": "forge.in.auth"
+          },
+          {
+            "from": "forge.out.repos",
+            "to": "git_activity.in.repos"
+          },
+          {
+            "from": "forge.out.commits",
+            "to": "git_activity.in.commits"
+          },
+          {
+            "from": "git_activity.out.view",
+            "to": "self.out.sidebar"
+          }
+        ]
+      }
+    }
+  }
+}

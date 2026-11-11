@@ -1,0 +1,193 @@
+{
+  "id": "0193a1c2-7d4e-7b3e-9f10-2d4c6a8b0e11",
+  "widget": {
+    "out": {
+      "view": {
+        "kind": "view"
+      }
+    },
+    "body": {
+      "compose": {
+        "children": {
+          "secrets": {
+            "out": {
+              "twitter": {
+                "kind": "call",
+                "input": "secret.request",
+                "output": "secret.signed",
+                "depends_on": []
+              }
+            },
+            "body": {
+              "primitive": {
+                "kind": "secrets"
+              }
+            }
+          },
+          "twitter": {
+            "in": {
+              "auth": {
+                "kind": "call",
+                "input": "secret.request",
+                "output": "secret.signed",
+                "adds": [
+                  "twitter"
+                ],
+                "accepts": [
+                  "twitter"
+                ],
+                "depends_on": []
+              }
+            },
+            "out": {
+              "posts": {
+                "kind": "data",
+                "schema": "list<twitter.post>",
+                "adds": [
+                  "twitter"
+                ]
+              }
+            },
+            "body": {
+              "primitive": {
+                "kind": "egress",
+                "config": {
+                  "host": "api.twitter.com"
+                }
+              }
+            }
+          },
+          "feed": {
+            "in": {
+              "posts": {
+                "kind": "data",
+                "schema": "list<twitter.post>"
+              }
+            },
+            "out": {
+              "view": {
+                "kind": "view"
+              }
+            },
+            "body": {
+              "compose": {
+                "children": {
+                  "merge": {
+                    "in": {
+                      "posts": {
+                        "kind": "data",
+                        "schema": "list<twitter.post>"
+                      },
+                      "back": {
+                        "kind": "data",
+                        "schema": "list<twitter.post>"
+                      }
+                    },
+                    "out": {
+                      "items": {
+                        "kind": "data",
+                        "schema": "list<twitter.post>"
+                      }
+                    },
+                    "body": {
+                      "primitive": {
+                        "kind": "expr",
+                        "config": {
+                          "concat": [
+                            "posts",
+                            "back"
+                          ]
+                        }
+                      }
+                    }
+                  },
+                  "sort": {
+                    "in": {
+                      "items": {
+                        "kind": "data",
+                        "schema": "list<twitter.post>"
+                      }
+                    },
+                    "out": {
+                      "items": {
+                        "kind": "data",
+                        "schema": "list<twitter.post>"
+                      }
+                    },
+                    "body": {
+                      "primitive": {
+                        "kind": "expr",
+                        "config": {
+                          "sort": "created_at desc"
+                        }
+                      }
+                    }
+                  },
+                  "list": {
+                    "in": {
+                      "rows": {
+                        "kind": "data",
+                        "schema": "list<twitter.post>"
+                      }
+                    },
+                    "out": {
+                      "view": {
+                        "kind": "view"
+                      }
+                    },
+                    "body": {
+                      "primitive": {
+                        "kind": "view",
+                        "config": {
+                          "a2ui": {
+                            "component": "List"
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
+                "wires": [
+                  {
+                    "from": "self.in.posts",
+                    "to": "merge.in.posts"
+                  },
+                  {
+                    "from": "merge.out.items",
+                    "to": "sort.in.items"
+                  },
+                  {
+                    "from": "sort.out.items",
+                    "to": "merge.in.back"
+                  },
+                  {
+                    "from": "sort.out.items",
+                    "to": "list.in.rows"
+                  },
+                  {
+                    "from": "list.out.view",
+                    "to": "self.out.view"
+                  }
+                ]
+              }
+            }
+          }
+        },
+        "wires": [
+          {
+            "from": "secrets.out.twitter",
+            "to": "twitter.in.auth"
+          },
+          {
+            "from": "twitter.out.posts",
+            "to": "feed.in.posts"
+          },
+          {
+            "from": "feed.out.view",
+            "to": "self.out.view"
+          }
+        ]
+      }
+    }
+  }
+}
