@@ -1,0 +1,14 @@
+[package]
+name = "design-tokens"
+version = "0.0.0"
+edition = "2024"
+license = "Apache-2.0"
+publish = false
+description = "Generates design/generated and design/logo from design/tokens.json."
+
+# Own cargo root: this tool is not a workspace crate (crates/* is).
+[workspace]
+
+[dependencies]
+resvg = "0.45"
+serde_json = { version = "1", features = ["preserve_order"] }
