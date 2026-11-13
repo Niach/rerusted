@@ -27,12 +27,22 @@ Every decision taken and every open question, each with its date and source issu
 | 2026-11-11 | The accent is checked against WCAG AA 3:1 (UI components and large text), not 4.5:1; it is never used for body text. | #RUST-15 |
 | 2026-11-11 | The token generator (OKLCH to sRGB hex, contrast check, logo and icons) is a Rust tool in `design/tools/`, its own cargo root. | #RUST-15 |
 | 2026-11-11 | Taken from Exponential's tokens unchanged: radius, size, spacing, type. Left out: semantic, avatar, glass, diff, menu, transcript, sidebar, chat, motion. | #RUST-15 |
+| 2026-11-13 | Spike crates: `teamlog` (our trait and types, no dependency) and `teamlog-p2panda` (the adapter). `identity` stays reserved for #RUST-17. Neither needs `unsafe`. | #RUST-30 |
+| 2026-11-13 | `rust-toolchain.toml` stays on `stable`; the host's stable was updated to 1.100.0 because p2panda 0.8 needs Rust 1.96. | #RUST-30 |
+| 2026-11-13 | The spike's transport is plain iroh 1.4 with a small exchange written in the test (heights, then what the other lacks). p2panda-net is not judged. iroh is a dev-dependency of the adapter only. | #RUST-30 |
+| 2026-11-13 | The repo gets its first CI workflow: one job, `cargo test --workspace --locked` on Linux. | #RUST-30 |
+| 2026-11-13 | Spike mapping: one member is one device key; `Role::Admin` is p2panda's `manage`, `Role::Member` its `write`; a team is one p2panda space. | #RUST-30 |
+| 2026-11-13 | An entry is a p2panda-core header plus the spaces message as its body, not in the header's extensions: the header decoder refuses any field longer than 512. `Entry.version` (1) is ours and wraps both. | #RUST-30 |
+| 2026-11-13 | The trait's history is `Payload { author, n, data }` instead of the planned entry id per payload: p2panda's decrypt event names neither the entry nor the author, so the adapter puts a versioned envelope (author, counter) inside the ciphertext. | #RUST-30 |
+| 2026-11-13 | An entry p2panda refuses is kept, counts as tried for the entries that depend on it, and is tried again whenever another entry was applied. Holding it back would hold back every later entry. | #RUST-30 |
+| 2026-11-13 | The adapter keeps its own tables next to p2panda's (log index with state, decrypted payloads, credentials): p2panda's store cannot list the devices it holds logs of and keeps no plaintext. | #RUST-30 |
+| 2026-11-13 | Where p2panda 0.8 behaves differently from #RUST-3, the tests assert what it does and mark it FINDING; they are not bent to pass. | #RUST-30 |
 
 ## Open questions
 
 | Date | Question | Source |
 |---|---|---|
-| 2026-11-10/11 | p2panda crates (auth, encryption, spaces) behind our own trait, or our own signed log? Proposed: a spike with two devices and a phone (remove a member, rejoin offline) before deciding. | #RUST-3, #RUST-18 |
+| 2026-11-10/11 | p2panda crates (auth, encryption, spaces) behind our own trait, or our own signed log? The spike (#RUST-30, 2026-11-13) ran and recommends our own log; the report is a comment on #RUST-3. The decision itself is still to be taken. | #RUST-3, #RUST-18, #RUST-30 |
 | 2026-11-10/11 | Painter: own on Vello, zgui, or gpui. | #RUST-18 (#RUST-8) |
 | 2026-11-10/11 | CI runner: write it ourselves, or build on an existing Rust runner (chimera) and write only the planner? | #RUST-9, #RUST-18 |
 | 2026-11-10/11 | Licence: Apache-2.0 is assumed. Ask before the first merge if it should differ. | #RUST-6, #RUST-18 |
