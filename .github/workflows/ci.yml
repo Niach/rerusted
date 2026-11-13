@@ -9,11 +9,18 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  # What the compositor crate links against, and what its tests start.
+  LINUX_PACKAGES: >-
+    libwayland-dev libxkbcommon-dev libpixman-1-dev libegl1-mesa-dev
+    xwayland xterm zenity dbus-daemon
+
 jobs:
   check:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends $LINUX_PACKAGES
       - run: rustup show
       - run: cargo fmt --all --check
       - run: cargo clippy --workspace --all-targets --locked -- -D warnings
@@ -26,5 +33,32 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
+      - if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update && sudo apt-get install -y --no-install-recommends $LINUX_PACKAGES
+          sudo mkdir -p /tmp/.X11-unix && sudo chmod 1777 /tmp/.X11-unix
       - run: rustup show
       - run: cargo test --workspace --locked
+
+  # A gpui window, panel and overlay as clients of the headless compositor.
+  # gpui is built from zed's git, outside the workspace, and draws with
+  # software Vulkan because the runner has no GPU.
+  gpui:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: |
+          sudo apt-get update && sudo apt-get install -y --no-install-recommends $LINUX_PACKAGES \
+            libfontconfig-dev libfreetype-dev libssl-dev libzstd-dev clang cmake \
+            libvulkan1 mesa-vulkan-drivers fonts-dejavu-core
+      - run: rustup show
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            .
+            spikes/gpui-shell
+      - run: cargo build --locked --manifest-path spikes/gpui-shell/Cargo.toml
+      - run: |
+          export VK_DRIVER_FILES="$(ls /usr/share/vulkan/icd.d/lvp_icd*.json | head -1)"
+          export GPUI_SHELL=spikes/gpui-shell/target/debug/gpui-shell
+          cargo test --locked -p compositor --test gpui -- --ignored

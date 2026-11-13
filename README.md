@@ -53,3 +53,5 @@ flowchart TB
 - [Dev and test rig](docs/spec/08-dev-rig.md): `cargo vm run` starts the VM tier
 - [Decisions and open questions](docs/decisions.md)
 - [`design/`](design/): theme tokens, generated hex, logo
+- [`crates/compositor/`](crates/compositor/README.md): the compositor spike, with the nested and headless commands (tiers 1 and 2 of the dev rig)
+- [`spikes/gpui-shell/`](spikes/gpui-shell/): a gpui window, panel and overlay as clients of the compositor

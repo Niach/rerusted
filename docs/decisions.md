@@ -39,6 +39,26 @@ Every decision taken and every open question, each with its date and source issu
 | 2026-11-13 | The binary the runner launches is a parameter (`--bin`, `--session`). Until #RUST-23 has a compositor the default is sway. | #RUST-22 |
 | 2026-11-13 | Rig images and state live in `~/.cache/rerusted/vm`, outside the checkout, so worktrees share them. Each guest start uses a throwaway overlay on the base image. | #RUST-22 |
 | 2026-11-13 | `target/` is shared by virtiofs and mounted read-only by the guest. The host side enforces it only when the installed virtiofsd has `--readonly`; version 1.10 on the development machine does not. | #RUST-22 |
+| 2026-11-13 | Licence: Apache-2.0, no longer a placeholder. The workspace manifest says so. | #RUST-6 |
+| 2026-11-13 | The compositor library is Smithay. | #RUST-20 |
+| 2026-11-13 | The painter is gpui. | #RUST-8 |
+| 2026-11-13 | `unsafe` rule: `forbid` is the workspace default; a crate that needs it overrides it to `deny` in its own manifest, is listed here by name with the reason, keeps `unsafe` in one module with a safety comment per block, and exposes only a safe API. `base`, `graph`, `identity` and `store` never get the exception. | #RUST-6 |
+| 2026-11-13 | Crates with the `unsafe` exception: none. The compositor spike (`compositor`, `spikes/gpui-shell`) needed none of its own. | #RUST-23 |
+| 2026-11-13 | The spike crate is `compositor`. It depends on no other workspace crate and is Linux only; elsewhere it compiles to nothing, so `cargo test` stays green on macOS. | #RUST-23 |
+| 2026-11-13 | The model type is `Desk`: one seat plus the outputs it works on, with its own window stack, Wayland socket and optional XWayland. The person's desk and an agent space are the same struct; a space is a desk with one virtual output. | #RUST-23 |
+| 2026-11-13 | A client belongs to the desk whose socket it connected to, and sees only that desk's seat and outputs. Layer shell is offered on the person's desk only. | #RUST-23 |
+| 2026-11-13 | Smithay is pinned to 0.7.0 plus one commit of our own (client filters for the `wl_seat` and `wl_output` globals), taken from a fork by git revision. Smithay has no such filter, in 0.7.0 or on `master`; the commit is to be sent upstream. | #RUST-23 |
+| 2026-11-13 | Smithay features in use: `wayland_frontend`, `desktop`, `renderer_pixman`, `renderer_gl`, `backend_winit`, `xwayland`. No DRM, GBM, libinput, udev or libseat in the spike. | #RUST-23 |
+| 2026-11-13 | Headless renders with pixman in memory (no GPU, shared-memory clients only); nested renders with GLES through winit. Every output, shown or not, renders into an off-screen target of its own; the nested window shows those textures. | #RUST-23 |
+| 2026-11-13 | Rendering is driven by client commits, at most once per 16.7 ms per output, never by a timer. A frame is delivered only when the render had damage. | #RUST-23 |
+| 2026-11-13 | One XWayland per space, started with the space. The person's desk has none in the spike. | #RUST-23 |
+| 2026-11-13 | A space is driven through a Rust handle in the same process (`DeskHandle`: spawn, pointer, button, key, text, windows, frames). No wire protocol for agents in the spike. | #RUST-23 |
+| 2026-11-13 | Windows in a space fill its output; windows on the person's desk cascade on the output the pointer is on and are kept out from under panels. No decorations, no layout. | #RUST-23 |
+| 2026-11-13 | A new window gets the keyboard of its desk; a click gives it to the window under the pointer. | #RUST-23 |
+| 2026-11-13 | Injected text is typed on a fixed US keymap, independent of the host's layout. | #RUST-23 |
+| 2026-11-13 | The test client for the compositor lives in `crates/compositor/tests/common/` and runs on a thread of the test; it is not a crate. | #RUST-23 |
+| 2026-11-13 | gpui for the layer-shell check is zed `main` at a pinned git revision, in `spikes/gpui-shell/`, a cargo root of its own so the workspace never builds zed. gpui 0.2.2 on crates.io has no layer shell. | #RUST-23 |
+| 2026-11-13 | The CI workflow installs what the compositor needs on Linux (Wayland, xkbcommon, pixman and EGL headers; XWayland, xterm, zenity and dbus-daemon for the tests) and has one more job that runs the gpui client against the headless compositor on software Vulkan. | #RUST-23, #RUST-21 |
 
 ## Open questions
 
