@@ -76,6 +76,7 @@ flowchart TB
 | Primitives, interfaces, system providers | #RUST-4 | [03-primitives-interfaces.md](03-primitives-interfaces.md) |
 | Design, default layout, onboarding, Mint parity | #RUST-5 | [04-design-layout-onboarding.md](04-design-layout-onboarding.md) |
 | Code and CI (phase 3) | #RUST-9 | [05-code-ci.md](05-code-ci.md) |
+| Dev and test rig | #RUST-21 | [08-dev-rig.md](08-dev-rig.md) |
 
 ## Phases
 
