@@ -50,5 +50,6 @@ flowchart TB
 - [Primitives and interfaces](docs/spec/03-primitives-interfaces.md)
 - [Design, layout, onboarding](docs/spec/04-design-layout-onboarding.md)
 - [Code and CI](docs/spec/05-code-ci.md)
+- [Dev and test rig](docs/spec/08-dev-rig.md): `cargo vm run` starts the VM tier
 - [Decisions and open questions](docs/decisions.md)
 - [`design/`](design/): theme tokens, generated hex, logo
