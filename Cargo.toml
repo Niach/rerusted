@@ -4,8 +4,13 @@ members = ["crates/*"]
 
 [workspace.package]
 edition = "2024"
-license = "MIT OR Apache-2.0"
+license = "Apache-2.0"
 publish = false
 
 [workspace.lints.rust]
 unsafe_code = "forbid"
+
+# Smithay 0.7.0 plus one commit: client filters for the wl_seat and wl_output
+# globals. See docs/decisions.md (2026-11-13, #RUST-23).
+[patch.crates-io]
+smithay = { git = "https://github.com/Niach/smithay", rev = "3737b405a29bf14769d6e19961673d872eb87841" }
