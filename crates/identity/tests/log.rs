@@ -71,7 +71,7 @@ fn refuses_what_is_not_a_valid_next_entry() {
     // In order they are taken, and taking them again changes nothing.
     now(b.ingest(first.clone())).unwrap();
     now(b.ingest(second.clone())).unwrap();
-    assert_eq!(now(b.ingest(first)), Ok((Vec::new(), Vec::new())));
+    assert_eq!(now(b.ingest(first.clone())), Ok((Vec::new(), Vec::new())));
     assert_eq!(now(b.heights()).unwrap()[&a.id()], 2);
 
     // A second entry for a position that is taken.
@@ -85,26 +85,24 @@ fn refuses_what_is_not_a_valid_next_entry() {
     let mut entry = second.clone();
     entry.bytes = format::seal(&forked, &key);
     entry.id = format::id(&entry.bytes);
-    assert_eq!(
-        now(b.ingest(entry)),
-        Err(Error::Fork {
-            author: a.id(),
-            seq: 1
-        })
-    );
+    // That is a fork: the log is cut back to it and nothing more is taken.
+    now(b.ingest(entry)).unwrap();
+    assert_eq!(now(b.forks()).unwrap()[&a.id()], 1);
+    assert_eq!(now(b.heights()).unwrap()[&a.id()], 1);
 
     // An entry that does not name the one before it.
+    let mut c = Replica::generate();
+    now(c.ingest(first)).unwrap();
     let broken = Body {
         author: a.id(),
-        seq: 2,
+        seq: 1,
         prev: EntryId([9; 32]),
         kind: Kind::Announce { sealing: [1; 32] },
     };
     let mut entry = second;
-    entry.seq = 2;
     entry.bytes = format::seal(&broken, &key);
     entry.id = format::id(&entry.bytes);
-    assert_eq!(now(b.ingest(entry)), Err(Error::Broken));
+    assert_eq!(now(c.ingest(entry)), Err(Error::Broken));
 }
 
 fn hex(bytes: &[u8]) -> String {

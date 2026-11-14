@@ -18,9 +18,13 @@
 //! 3 remove   = team under parents member cut flag [key] boxes
 //! 4 rotate   = team under parents key boxes
 //! 5 payload  = team under key nonce text
+//! 6 handover = team under parents member cut
+//! 7 leave    = team under parents
+//! 8 accept   = team under parents u32 length, entry       the handover, whole
 //!
 //! team, under, member, key = 32 bytes each
-//! parents    = u16 count, then ids of 32 bytes, ascending, at least one
+//! parents    = u16 count, then (device, seq, id) of 32, 8 and 32 bytes,
+//!              ascending by device, one per device, at least one
 //! role       = 1 byte: 0 member, 1 admin
 //! cut        = u64
 //! flag       = 1 byte: 1 when a key follows, else 0
@@ -31,13 +35,22 @@
 //!
 //! Integers are big-endian. A decoder accepts exactly these bytes: nothing
 //! may follow, and parents out of order are refused.
+//!
+//! The proof that a device forked is not an entry and belongs to no log:
+//!
+//! ```text
+//! proof      = u32 length, entry, u32 length, entry
+//! ```
+//!
+//! Two entries of one author for one position, each with its signature, the
+//! one with the lower id first.
 
 use ed25519_dalek::{Signature, Signer, SigningKey, VerifyingKey};
 use sha2::{Digest, Sha256};
 use teamlog::{DeviceId, EntryId, Role, TeamId};
 
 use crate::Error;
-use crate::rules::KeyId;
+use crate::rules::{KeyId, Parent};
 
 /// The version of the body layout, the first signed byte of every entry.
 pub const FORMAT_VERSION: u8 = 1;
@@ -65,7 +78,7 @@ pub enum Kind {
     Set {
         team: TeamId,
         under: EntryId,
-        parents: Vec<EntryId>,
+        parents: Vec<Parent>,
         member: DeviceId,
         role: Role,
         cut: u64,
@@ -75,7 +88,7 @@ pub enum Kind {
     Remove {
         team: TeamId,
         under: EntryId,
-        parents: Vec<EntryId>,
+        parents: Vec<Parent>,
         member: DeviceId,
         cut: u64,
         key: Option<KeyId>,
@@ -84,7 +97,7 @@ pub enum Kind {
     Rotate {
         team: TeamId,
         under: EntryId,
-        parents: Vec<EntryId>,
+        parents: Vec<Parent>,
         key: KeyId,
         boxes: Vec<Lockbox>,
     },
@@ -94,6 +107,25 @@ pub enum Kind {
         key: KeyId,
         nonce: [u8; 24],
         text: Vec<u8>,
+    },
+    Handover {
+        team: TeamId,
+        under: EntryId,
+        parents: Vec<Parent>,
+        member: DeviceId,
+        cut: u64,
+    },
+    Leave {
+        team: TeamId,
+        under: EntryId,
+        parents: Vec<Parent>,
+    },
+    Accept {
+        team: TeamId,
+        under: EntryId,
+        parents: Vec<Parent>,
+        /// The handover entry with its signature.
+        handover: Vec<u8>,
     },
 }
 
@@ -116,10 +148,12 @@ fn put_boxes(out: &mut Vec<u8>, boxes: &[Lockbox]) {
     }
 }
 
-fn put_parents(out: &mut Vec<u8>, parents: &[EntryId]) {
+fn put_parents(out: &mut Vec<u8>, parents: &[Parent]) {
     out.extend_from_slice(&(parents.len() as u16).to_be_bytes());
     for parent in parents {
-        out.extend_from_slice(&parent.0);
+        out.extend_from_slice(&parent.device.0);
+        out.extend_from_slice(&parent.seq.to_be_bytes());
+        out.extend_from_slice(&parent.id.0);
     }
 }
 
@@ -216,6 +250,43 @@ impl Body {
                 out.extend_from_slice(&(text.len() as u32).to_be_bytes());
                 out.extend_from_slice(text);
             }
+            Kind::Handover {
+                team,
+                under,
+                parents,
+                member,
+                cut,
+            } => {
+                out.push(6);
+                out.extend_from_slice(&team.0);
+                out.extend_from_slice(&under.0);
+                put_parents(&mut out, parents);
+                out.extend_from_slice(&member.0);
+                out.extend_from_slice(&cut.to_be_bytes());
+            }
+            Kind::Leave {
+                team,
+                under,
+                parents,
+            } => {
+                out.push(7);
+                out.extend_from_slice(&team.0);
+                out.extend_from_slice(&under.0);
+                put_parents(&mut out, parents);
+            }
+            Kind::Accept {
+                team,
+                under,
+                parents,
+                handover,
+            } => {
+                out.push(8);
+                out.extend_from_slice(&team.0);
+                out.extend_from_slice(&under.0);
+                put_parents(&mut out, parents);
+                out.extend_from_slice(&(handover.len() as u32).to_be_bytes());
+                out.extend_from_slice(handover);
+            }
         }
         out
     }
@@ -250,16 +321,20 @@ impl<'a> Reader<'a> {
         Ok(u64::from_be_bytes(self.array()?))
     }
 
-    fn parents(&mut self) -> Result<Vec<EntryId>, Error> {
+    fn parents(&mut self) -> Result<Vec<Parent>, Error> {
         let count = self.u16()?;
         let mut parents = Vec::new();
         for _ in 0..count {
-            parents.push(EntryId(self.array()?));
+            parents.push(Parent {
+                device: DeviceId(self.array()?),
+                seq: self.u64()?,
+                id: EntryId(self.array()?),
+            });
         }
         if parents.is_empty() {
             return Err(Error::Malformed("no parents"));
         }
-        if !parents.is_sorted_by(|a, b| a < b) {
+        if !parents.is_sorted_by(|a, b| a.device < b.device) {
             return Err(Error::Malformed("parents out of order"));
         }
         Ok(parents)
@@ -347,6 +422,27 @@ fn decode_body(bytes: &[u8]) -> Result<Body, Error> {
                 r.take(len)?.to_vec()
             },
         },
+        6 => Kind::Handover {
+            team: TeamId(r.array()?),
+            under: EntryId(r.array()?),
+            parents: r.parents()?,
+            member: DeviceId(r.array()?),
+            cut: r.u64()?,
+        },
+        7 => Kind::Leave {
+            team: TeamId(r.array()?),
+            under: EntryId(r.array()?),
+            parents: r.parents()?,
+        },
+        8 => Kind::Accept {
+            team: TeamId(r.array()?),
+            under: EntryId(r.array()?),
+            parents: r.parents()?,
+            handover: {
+                let len = u32::from_be_bytes(r.array()?) as usize;
+                r.take(len)?.to_vec()
+            },
+        },
         _ => return Err(Error::Malformed("kind")),
     };
     if !r.0.is_empty() {
@@ -376,6 +472,14 @@ pub fn seal(body: &Body, key: &SigningKey) -> Vec<u8> {
     bytes
 }
 
+/// Decodes an entry that was verified before.
+pub fn read(entry: &[u8]) -> Result<Body, Error> {
+    let (bytes, _) = entry
+        .split_last_chunk::<SIGNATURE_LEN>()
+        .ok_or(Error::Malformed("too short"))?;
+    decode_body(bytes)
+}
+
 /// Decodes an entry and verifies its signature.
 pub fn open(entry: &[u8]) -> Result<Body, Error> {
     if let Some(version) = entry.first()
@@ -392,4 +496,38 @@ pub fn open(entry: &[u8]) -> Result<Body, Error> {
     key.verify_strict(&signed(bytes), &Signature::from_bytes(signature))
         .map_err(|_| Error::BadSignature)?;
     Ok(body)
+}
+
+/// The proof that the author of `a` and `b` forked: two different entries
+/// of one device for one position.
+pub fn proof(a: &[u8], b: &[u8]) -> Vec<u8> {
+    let (first, second) = if id(a) < id(b) { (a, b) } else { (b, a) };
+    let mut out = Vec::new();
+    for entry in [first, second] {
+        out.extend_from_slice(&(entry.len() as u32).to_be_bytes());
+        out.extend_from_slice(entry);
+    }
+    out
+}
+
+/// Verifies a proof and says which device forked at which position.
+pub fn open_proof(proof: &[u8]) -> Result<(DeviceId, u64), Error> {
+    let mut r = Reader(proof);
+    let mut entries = Vec::new();
+    for _ in 0..2 {
+        let len = u32::from_be_bytes(r.array()?) as usize;
+        let entry = r.take(len)?;
+        entries.push((id(entry), open(entry)?));
+    }
+    if !r.0.is_empty() {
+        return Err(Error::Malformed("trailing bytes"));
+    }
+    let (first, second) = (&entries[0], &entries[1]);
+    if first.0 >= second.0 {
+        return Err(Error::Malformed("proof out of order"));
+    }
+    if (first.1.author, first.1.seq) != (second.1.author, second.1.seq) {
+        return Err(Error::Malformed("proof of nothing"));
+    }
+    Ok((first.1.author, first.1.seq))
 }

@@ -41,6 +41,18 @@ flowchart TD
 - Concurrent admin actions follow one fixed rule (decided 2026-11-14): only the owner removes or demotes an admin, so two admins cannot remove each other. Between admins, a removal beats an admission it had not seen.
 - A team's always-on peer is whichever full device is running. If none runs, the team is offline. That is accepted.
 
+### The team log's rules
+
+Decided 2026-11-14 and built in the crate `identity` (#RUST-39). The rules are a function of the entries a replica holds, so replicas that hold the same agree.
+
+- **Ranks.** Owner, admin, member. An operation on a device counts only if its author ranks strictly higher than the device and than the role it hands out. Admins admit and remove members; only the owner makes, unmakes or removes an admin; nobody removes the owner.
+- **Cuts.** A removal, an admission and a change of role name how many entries of the target's log the author held. The new standing applies from there on. What a device wrote that its removal had not seen is void on every replica.
+- **Concurrent operations.** The owner's count. An admin's is void when the owner acted on the same device and neither had seen the other. Between admins, a removal beats an admission it had not seen.
+- **Handing over.** The owner hands the team to a member with one operation and stays as admin. What the old owner writes after it in its own log is an admin's. The new owner accepts with an entry that carries the signed handover and acts as owner under it. A handover beats an admin's removal of the new owner that had not seen it.
+- **Leaving.** A member takes itself out; the owner hands over first. A leave beats every admission, promotion and handover of the leaver that it had not seen, and a handover that is void this way leaves the old owner the owner.
+- **Forks.** A device that signs two entries for one position of its log has forked. The two entries are the proof, and replicas pass it on beside the logs. From the lowest such position on, nothing of that log counts, on any branch; what the device wrote before stays; the device is out for good and joins again as a new device. A device key is therefore never restored from a backup and used again. An accepted handover stands when the old owner forks below it. When the owner itself forks, the team has no owner: members and admins go on, nobody makes or removes an admin.
+- **Keys.** One key per epoch, sealed per device. A removal carries the new key. The current key is the newest one held by exactly the current members; when none is (two removals at once, a leave, a fork, an admission that was overruled), the next writer makes one. A device admitted again gets a new key and none of the old ones; a device new to the team gets all of them.
+
 ## Scopes
 
 Every store has a scope, enforced by the store, not by policy:

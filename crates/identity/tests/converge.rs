@@ -6,11 +6,11 @@ mod common;
 
 use std::collections::BTreeMap;
 
-use common::{Node, now, settle, sync};
+use common::{Backup, Node, now, settle, sync};
 use identity::Replica;
 use identity::format::Kind;
 use identity::rules::KeyId;
-use teamlog::Role::{Admin, Member};
+use teamlog::Role::{Admin, Member, Owner};
 use teamlog::{DeviceId, Entry, EntryId, Event, Payload, TeamId, TeamLog};
 
 /// xorshift64*: the runs have to be the same every time.
@@ -33,13 +33,19 @@ const NAMES: [&str; 6] = ["a", "b", "c", "d", "e", "f"];
 
 /// One thing a device does. Honest calls go through the rules and may be
 /// refused; forged entries are written whatever the rules say.
-fn act(random: &mut Random, team: TeamId, nodes: &mut [Node], step: usize) {
+fn act(
+    random: &mut Random,
+    team: TeamId,
+    nodes: &mut [Node],
+    backups: &mut [Option<Backup>],
+    step: usize,
+) {
     let i = random.below(nodes.len());
     let j = random.below(nodes.len());
     let other = nodes[j].id();
     let role = if random.below(3) == 0 { Admin } else { Member };
     let node = &mut nodes[i];
-    match random.below(12) {
+    match random.below(19) {
         0..3 => {
             let _ = now(node
                 .log
@@ -60,8 +66,26 @@ fn act(random: &mut Random, team: TeamId, nodes: &mut [Node], step: usize) {
                 sync(&mut left[i.min(j)], &mut right[0]);
             }
         }
-        // A device that ignores the rules: it removes, admits or promotes
-        // whoever, under whatever operation it can name.
+        11 => {
+            let _ = now(node.log.hand_over(team, other));
+        }
+        12 => {
+            let _ = now(node.log.leave(team));
+        }
+        // A backup of the device's disk, and the disk put back to it: what
+        // the device writes then forks its log.
+        13 | 14 => backups[i] = Some(node.backup()),
+        15 | 16 => {
+            // It writes before it hears of what it wrote since the backup.
+            if let Some(backup) = &backups[i] {
+                node.restore(backup);
+                node.forge(Kind::Announce {
+                    sealing: [step as u8; 32],
+                });
+            }
+        }
+        // A device that ignores the rules: it removes, admits, promotes or
+        // hands the team to whoever, under whatever operation it can name.
         _ => {
             let Some(resolved) = node.log.team(team) else {
                 return;
@@ -72,13 +96,26 @@ fn act(random: &mut Random, team: TeamId, nodes: &mut [Node], step: usize) {
                 Some(EntryId(team.0)),
             ][random.below(3)]
             .unwrap_or(EntryId(team.0));
-            let kind = match random.below(3) {
+            let parents = resolved.parents().to_vec();
+            let kind = match random.below(5) {
                 0 => node.removal(team, other, under),
                 1 => node.setting(team, other, role, under),
+                2 => Kind::Handover {
+                    team,
+                    under,
+                    parents,
+                    member: other,
+                    cut: node.height_of(other),
+                },
+                3 => Kind::Leave {
+                    team,
+                    under,
+                    parents,
+                },
                 _ => Kind::Rotate {
                     team,
                     under,
-                    parents: resolved.heads().to_vec(),
+                    parents,
                     key: KeyId([step as u8; 32]),
                     boxes: Vec::new(),
                 },
@@ -107,7 +144,8 @@ fn shuffled(random: &mut Random, entries: Vec<Entry>) -> Vec<Entry> {
     out
 }
 
-fn run(seed: u64) {
+/// Returns whether a device forked and whether the team changed owner.
+fn run(seed: u64) -> (bool, bool) {
     let mut random = Random(seed.wrapping_mul(0x9e37_79b9_7f4a_7c15) | 1);
     let mut nodes = NAMES.map(Node::new);
     {
@@ -119,23 +157,42 @@ fn run(seed: u64) {
     now(first[0].log.add_member(team, rest[0].id(), Admin)).unwrap();
     now(first[0].log.add_member(team, rest[1].id(), Admin)).unwrap();
     now(first[0].log.add_member(team, rest[2].id(), Member)).unwrap();
+    let mut backups = NAMES.map(|_| None);
     for step in 0..60 {
-        act(&mut random, team, &mut nodes, step);
+        act(&mut random, team, &mut nodes, &mut backups, step);
     }
     {
         let [a, b, c, d, e, f] = &mut nodes;
         settle(&mut [a, b, c, d, e, f]);
     }
 
-    // 1. Everybody agrees on the members, the key and what is void.
+    // 1. Everybody agrees on the members, the owner, the key, what is void
+    //    and who forked where. There is at most one owner.
     let members = now(nodes[0].log.members(team)).unwrap();
+    let owner = nodes[0].log.team(team).unwrap().owner();
     let key = nodes[0].log.team(team).unwrap().current_key();
     let void = nodes[0].log.void(team);
-    assert!(members.contains(&(nodes[0].id(), teamlog::Role::Owner)));
+    let forks = now(nodes[0].log.forks()).unwrap();
+    let owners = members.iter().filter(|(_, role)| *role == Owner);
+    assert_eq!(
+        owners.map(|(device, _)| *device).collect::<Vec<_>>(),
+        Vec::from_iter(owner),
+        "{seed}"
+    );
     for node in &nodes {
         assert_eq!(now(node.log.members(team)).unwrap(), members, "{seed}");
+        assert_eq!(node.log.team(team).unwrap().owner(), owner, "{seed}");
         assert_eq!(node.log.team(team).unwrap().current_key(), key, "{seed}");
         assert_eq!(node.log.void(team), void, "{seed}");
+        assert_eq!(now(node.log.forks()).unwrap(), forks, "{seed}");
+        assert_eq!(
+            now(node.log.tips()).unwrap(),
+            now(nodes[0].log.tips()).unwrap(),
+            "{seed}"
+        );
+    }
+    for device in forks.keys() {
+        assert!(!members.iter().any(|(member, _)| member == device));
     }
 
     // 2. A replica that gets the same entries in another order, in one go,
@@ -143,8 +200,22 @@ fn run(seed: u64) {
     for node in &nodes {
         let mut other = Replica::from_seed(node.log.seed());
         let mut told: BTreeMap<(DeviceId, u64), Vec<u8>> = BTreeMap::new();
+        let mut proofs = node.log.proofs();
         for entry in shuffled(&mut random, node.log.entries()) {
-            for event in now(other.ingest(entry)).unwrap().0 {
+            let mut events = Vec::new();
+            // The proofs come in somewhere between the entries.
+            if random.below(8) == 0
+                && let Some(proof) = proofs.pop()
+            {
+                events.extend(now(other.ingest_proof(&proof)).unwrap());
+            }
+            events.extend(now(other.ingest(entry)).unwrap().0);
+            if random.below(8) == 0 {
+                for proof in proofs.drain(..) {
+                    events.extend(now(other.ingest_proof(&proof)).unwrap());
+                }
+            }
+            for event in events {
                 match event {
                     Event::Payload { payload, .. } => {
                         assert!(
@@ -159,7 +230,11 @@ fn run(seed: u64) {
                 }
             }
         }
+        for proof in proofs {
+            now(other.ingest_proof(&proof)).unwrap();
+        }
         assert_eq!(now(other.members(team)).unwrap(), members, "{seed}");
+        assert_eq!(now(other.forks()).unwrap(), forks, "{seed}");
         assert_eq!(other.team(team).unwrap().current_key(), key, "{seed}");
         assert_eq!(other.void(team), void, "{seed}");
         let history = now(other.history(team)).unwrap();
@@ -185,7 +260,7 @@ fn run(seed: u64) {
         settle(&mut [a, b, c, d, e, f]);
     }
     let key = nodes[0].log.team(team).unwrap().current_key();
-    assert!(key.is_some(), "{seed}");
+    assert!(key.is_some() || written.is_empty(), "{seed}");
     for node in &nodes {
         assert_eq!(now(node.log.members(team)).unwrap(), members, "{seed}");
         assert_eq!(node.log.team(team).unwrap().current_key(), key, "{seed}");
@@ -200,13 +275,23 @@ fn run(seed: u64) {
             assert!(read.is_empty(), "{seed} {}", node.name);
         }
     }
+    (
+        !forks.is_empty(),
+        owner.is_some_and(|owner| owner != nodes[0].id()),
+    )
 }
 
 #[test]
 fn replicas_agree_whatever_happened() {
     // More with `SEEDS=5000 cargo test --release -p identity --test converge`.
     let seeds = std::env::var("SEEDS").map_or(40, |seeds| seeds.parse().unwrap());
+    let (mut forked, mut handed) = (0, 0);
     for seed in 0..seeds {
-        run(seed);
+        let (fork, handover) = run(seed);
+        forked += fork as u32;
+        handed += handover as u32;
     }
+    // The runs have to reach what they are for.
+    println!("{forked} of {seeds} runs with a fork, {handed} with another owner at the end");
+    assert!(forked > seeds as u32 / 10 && handed > seeds as u32 / 20);
 }

@@ -115,7 +115,7 @@ impl Node {
         Kind::Remove {
             team,
             under,
-            parents: self.log.team(team).unwrap().heads().to_vec(),
+            parents: self.log.team(team).unwrap().parents().to_vec(),
             member,
             cut: self.height_of(member),
             key: None,
@@ -128,7 +128,7 @@ impl Node {
         Kind::Set {
             team,
             under,
-            parents: self.log.team(team).unwrap().heads().to_vec(),
+            parents: self.log.team(team).unwrap().parents().to_vec(),
             member,
             role,
             cut: self.height_of(member),
@@ -138,14 +138,55 @@ impl Node {
     }
 }
 
-/// Gives `to` every entry `from` holds and `to` lacks.
+/// What a store would keep of a replica: its seed, entries and proofs.
+pub struct Backup {
+    seed: [u8; 32],
+    entries: Vec<Entry>,
+    proofs: Vec<Vec<u8>>,
+}
+
+impl Node {
+    pub fn backup(&self) -> Backup {
+        Backup {
+            seed: self.log.seed(),
+            entries: self.log.entries(),
+            proofs: self.log.proofs(),
+        }
+    }
+
+    /// Puts the device back to a backup, as a restored disk would. What it
+    /// wrote since is forgotten here and lives on wherever it was synced
+    /// to: the next entry forks the device's log.
+    pub fn restore(&mut self, backup: &Backup) {
+        self.log =
+            Replica::restore(backup.seed, backup.entries.clone(), backup.proofs.clone()).unwrap();
+    }
+}
+
+/// Gives `to` every proof and entry `from` holds and `to` lacks. Where the
+/// two hold different logs of a device, `to` gets the whole of `from`'s and
+/// finds where they part.
 fn give(from: &Node, to: &mut Node) {
-    for (device, height) in now(from.log.heights()).unwrap() {
-        let have = to.height_of(device);
-        if have < height {
-            for entry in now(from.log.entries_after(device, have)).unwrap() {
-                to.take(entry);
+    let known = now(to.log.forks()).unwrap();
+    for (device, at) in now(from.log.forks()).unwrap() {
+        if known.get(&device).is_none_or(|known| *known > at) {
+            let proof = now(from.log.fork_proof(device)).unwrap().unwrap();
+            let events = now(to.log.ingest_proof(&proof)).unwrap();
+            to.events.extend(events);
+        }
+    }
+    let theirs = now(to.log.tips()).unwrap();
+    for (device, (height, _)) in now(from.log.tips()).unwrap() {
+        let start = match theirs.get(&device) {
+            None => 0,
+            Some((have, _)) if *have > height => continue,
+            Some((have, tip)) => {
+                let mine = now(from.log.entries_after(device, have - 1)).unwrap();
+                if mine[0].id == *tip { *have } else { 0 }
             }
+        };
+        for entry in now(from.log.entries_after(device, start)).unwrap() {
+            to.take(entry);
         }
     }
 }
@@ -158,20 +199,20 @@ pub fn sync(a: &mut Node, b: &mut Node) {
 /// Syncs every pair until nothing moves.
 pub fn settle(nodes: &mut [&mut Node]) {
     loop {
-        let before: Vec<_> = nodes
-            .iter()
-            .map(|node| now(node.log.heights()).unwrap())
-            .collect();
+        let state = |node: &&mut Node| {
+            (
+                now(node.log.tips()).unwrap(),
+                now(node.log.forks()).unwrap(),
+            )
+        };
+        let before: Vec<_> = nodes.iter().map(state).collect();
         for i in 0..nodes.len() {
             for j in i + 1..nodes.len() {
                 let (left, right) = nodes.split_at_mut(j);
                 sync(left[i], right[0]);
             }
         }
-        let after: Vec<_> = nodes
-            .iter()
-            .map(|node| now(node.log.heights()).unwrap())
-            .collect();
+        let after: Vec<_> = nodes.iter().map(state).collect();
         if before == after {
             return;
         }

@@ -60,6 +60,18 @@ fn agree(team: TeamId, nodes: &[&Node]) -> Option<KeyId> {
             node.name
         );
         assert_eq!(node.log.void(team), first.log.void(team), "{}", node.name);
+        assert_eq!(
+            now(node.log.forks()).unwrap(),
+            now(first.log.forks()).unwrap(),
+            "{}",
+            node.name
+        );
+        assert_eq!(
+            node.log.team(team).unwrap().owner(),
+            first.log.team(team).unwrap().owner(),
+            "{}",
+            node.name
+        );
     }
     first.log.team(team).unwrap().current_key()
 }
@@ -322,7 +334,7 @@ fn a_removed_admin_cannot_backdate() {
     let (team, mut nodes) = team();
     let [a, b, c, d, e] = &mut nodes;
     let old_grant = admin_grant(b, team);
-    let old_heads = b.log.team(team).unwrap().heads().to_vec();
+    let old_heads = b.log.team(team).unwrap().parents().to_vec();
     let old_member_grant = b.log.team(team).unwrap().member_grant(b.id()).unwrap();
 
     now(a.log.remove_member(team, b.id())).unwrap();
@@ -458,7 +470,9 @@ fn a_replica_is_restored_from_its_seed_and_entries() {
     settle(&mut [a, b, c, d, e]);
 
     for node in [&*a, &*b, &*c, &*d, &*e] {
-        let restored = identity::Replica::restore(node.log.seed(), node.log.entries()).unwrap();
+        let restored =
+            identity::Replica::restore(node.log.seed(), node.log.entries(), node.log.proofs())
+                .unwrap();
         assert_eq!(
             now(restored.members(team)).unwrap(),
             now(node.log.members(team)).unwrap()
@@ -472,4 +486,479 @@ fn a_replica_is_restored_from_its_seed_and_entries() {
             node.log.team(team).unwrap().current_key()
         );
     }
+}
+
+// ── handing the team over ───────────────────────────────────────────────────
+
+#[test]
+fn the_owner_hands_the_team_over() {
+    let (team, mut nodes) = team();
+    let [a, b, c, d, e] = &mut nodes;
+
+    assert_eq!(now(b.log.hand_over(team, c.id())), Err(Error::NotAllowed));
+    assert_eq!(now(a.log.hand_over(team, a.id())), Err(Error::NotAllowed));
+    now(a.log.hand_over(team, b.id())).unwrap();
+    settle(&mut [a, b, c, d, e]);
+    let all = [&*a, &*b, &*c, &*d, &*e];
+    for node in all {
+        assert_eq!(
+            node.roles(team, &all),
+            [
+                ("a", Admin),
+                ("b", Owner),
+                ("c", Admin),
+                ("d", Member),
+                ("e", Member)
+            ],
+            "{}",
+            node.name
+        );
+    }
+    // The old owner is an admin now: no power over admins.
+    assert_eq!(
+        now(a.log.set_role(team, d.id(), Admin)),
+        Err(Error::NotAllowed)
+    );
+    assert_eq!(
+        now(a.log.remove_member(team, c.id())),
+        Err(Error::NotAllowed)
+    );
+    // The new owner accepts with its first act, and can remove the old one.
+    assert_eq!(now(b.log.set_role(team, d.id(), Admin)).unwrap().len(), 2);
+    assert_eq!(now(b.log.remove_member(team, a.id())).unwrap().len(), 1);
+    settle(&mut [a, b, c, d, e]);
+    let all = [&*a, &*b, &*c, &*d, &*e];
+    for node in all {
+        assert_eq!(
+            node.roles(team, &all),
+            [("b", Owner), ("c", Admin), ("d", Admin), ("e", Member)],
+            "{}",
+            node.name
+        );
+    }
+    agree(team, &all);
+}
+
+/// The old owner goes on offline after handing over, by the rules and
+/// against them.
+#[test]
+fn what_the_old_owner_writes_after_handing_over_is_an_admins() {
+    let (team, mut nodes) = team();
+    let [a, b, c, d, e] = &mut nodes;
+    let first = EntryId(team.0);
+
+    now(a.log.hand_over(team, b.id())).unwrap();
+    // As an admin it still removes a member.
+    let removal = now(a.log.remove_member(team, e.id())).unwrap();
+    // As the owner it was, it promotes, removes an admin, and hands the
+    // team to somebody else.
+    let promotion = a.forge(a.setting(team, d.id(), Admin, first));
+    let admin_removal = a.forge(a.removal(team, c.id(), first));
+    let second = a.forge(Kind::Handover {
+        team,
+        under: first,
+        parents: a.log.team(team).unwrap().parents().to_vec(),
+        member: c.id(),
+        cut: a.height_of(c.id()),
+    });
+    settle(&mut [a, b, c, d, e]);
+
+    let all = [&*a, &*b, &*c, &*d, &*e];
+    for node in all {
+        assert_eq!(
+            node.roles(team, &all),
+            [("a", Admin), ("b", Owner), ("c", Admin), ("d", Member)],
+            "{}",
+            node.name
+        );
+        let resolved = node.log.team(team).unwrap();
+        assert!(resolved.counted(removal[0].id));
+        for forged in [&promotion, &admin_removal, &second] {
+            assert!(!resolved.counted(forged.id));
+        }
+    }
+    agree(team, &all);
+}
+
+/// The owner hands the team to a member that an admin removes at the same
+/// time.
+#[test]
+fn a_handover_beats_an_admins_removal_of_the_new_owner() {
+    let (team, mut nodes) = team();
+    let [a, b, c, d, e] = &mut nodes;
+
+    now(a.log.hand_over(team, d.id())).unwrap();
+    let removal = now(b.log.remove_member(team, d.id())).unwrap();
+    settle(&mut [a, b, c, d, e]);
+
+    let all = [&*a, &*b, &*c, &*d, &*e];
+    for node in all {
+        assert_eq!(
+            node.roles(team, &all),
+            [
+                ("a", Admin),
+                ("b", Admin),
+                ("c", Admin),
+                ("d", Owner),
+                ("e", Member)
+            ],
+            "{}",
+            node.name
+        );
+        assert!(!node.log.team(team).unwrap().counted(removal[0].id));
+    }
+    assert!(agree(team, &all).is_some());
+    now(d.log.remove_member(team, b.id())).unwrap();
+}
+
+/// The owner hands the team to a member that leaves at the same time.
+#[test]
+fn a_handover_to_a_member_that_left_unseen_is_void() {
+    let (team, mut nodes) = team();
+    let [a, b, c, d, e] = &mut nodes;
+
+    let handover = now(a.log.hand_over(team, d.id())).unwrap();
+    now(d.log.leave(team)).unwrap();
+    settle(&mut [a, b, c, d, e]);
+
+    let all = [&*a, &*b, &*c, &*d, &*e];
+    for node in all {
+        assert_eq!(
+            node.roles(team, &all),
+            [("a", Owner), ("b", Admin), ("c", Admin), ("e", Member)],
+            "{}",
+            node.name
+        );
+        assert!(!node.log.team(team).unwrap().counted(handover[0].id));
+    }
+    agree(team, &all);
+    // The owner is still the owner and hands over to somebody who is there.
+    now(a.log.hand_over(team, b.id())).unwrap();
+    settle(&mut [a, b, c, d, e]);
+    assert_eq!(e.log.team(team).unwrap().owner(), Some(b.id()));
+}
+
+/// The old owner's device is put back to a backup from before the handover
+/// and writes: its log forks below the handover.
+#[test]
+fn an_accepted_handover_stands_when_the_old_owner_forks_below_it() {
+    let (team, mut nodes) = team();
+    let [a, b, c, d, e] = &mut nodes;
+    let backup = a.backup();
+
+    now(a.log.hand_over(team, b.id())).unwrap();
+    settle(&mut [a, b, c, d, e]);
+    now(b.log.set_role(team, d.id(), Admin)).unwrap();
+    settle(&mut [a, b, c, d, e]);
+
+    a.restore(&backup);
+    assert_eq!(a.log.team(team).unwrap().owner(), Some(a.id()));
+    now(a.log.set_role(team, e.id(), Admin)).unwrap();
+    settle(&mut [a, b, c, d, e]);
+
+    let all = [&*a, &*b, &*c, &*d, &*e];
+    agree(team, &all);
+    for node in all {
+        assert!(now(node.log.forks()).unwrap().contains_key(&a.id()));
+        assert_eq!(
+            node.roles(team, &all),
+            [("b", Owner), ("c", Admin), ("d", Admin), ("e", Member)],
+            "{}",
+            node.name
+        );
+    }
+    assert_eq!(now(a.log.write(team, b"x")), Err(Error::Forked));
+}
+
+/// The same, but the new owner had not acted yet: nothing holds the
+/// handover outside the old owner's log.
+#[test]
+fn an_unaccepted_handover_falls_with_the_old_owners_fork() {
+    let (team, mut nodes) = team();
+    let [a, b, c, d, e] = &mut nodes;
+    let backup = a.backup();
+
+    now(a.log.hand_over(team, b.id())).unwrap();
+    settle(&mut [a, b, c, d, e]);
+    a.restore(&backup);
+    a.write(team, "from the backup");
+    settle(&mut [a, b, c, d, e]);
+
+    let all = [&*a, &*b, &*c, &*d, &*e];
+    agree(team, &all);
+    for node in all {
+        assert_eq!(node.log.team(team).unwrap().owner(), None);
+        assert_eq!(
+            node.roles(team, &all),
+            [("b", Admin), ("c", Admin), ("d", Member), ("e", Member)],
+            "{}",
+            node.name
+        );
+    }
+}
+
+/// An owner forks and hands the team to two devices, and both accept.
+#[test]
+fn two_accepted_handovers_of_a_forked_owner_leave_no_owner() {
+    let (team, mut nodes) = team();
+    let [a, b, c, d, e] = &mut nodes;
+    let backup = a.backup();
+
+    now(a.log.hand_over(team, b.id())).unwrap();
+    sync(a, b);
+    now(b.log.set_role(team, d.id(), Admin)).unwrap();
+    a.restore(&backup);
+    now(a.log.hand_over(team, c.id())).unwrap();
+    sync(a, c);
+    now(c.log.set_role(team, e.id(), Admin)).unwrap();
+    settle(&mut [a, b, c, d, e]);
+
+    let all = [&*a, &*b, &*c, &*d, &*e];
+    agree(team, &all);
+    for node in all {
+        // Neither is owner, and what each did as owner is void.
+        assert_eq!(node.log.team(team).unwrap().owner(), None);
+        assert_eq!(
+            node.roles(team, &all),
+            [("b", Admin), ("c", Admin), ("d", Member), ("e", Member)],
+            "{}",
+            node.name
+        );
+    }
+}
+
+// ── leaving ─────────────────────────────────────────────────────────────────
+
+#[test]
+fn a_member_leaves_and_the_key_changes() {
+    let (team, mut nodes) = team();
+    let [a, b, c, d, e] = &mut nodes;
+
+    assert_eq!(now(a.log.leave(team)), Err(Error::NotAllowed));
+    now(d.log.leave(team)).unwrap();
+    now(b.log.leave(team)).unwrap();
+    assert_eq!(now(d.log.leave(team)), Err(Error::NotMember));
+    assert_eq!(now(d.log.write(team, b"gone")), Err(Error::NotMember));
+    settle(&mut [a, b, c, d, e]);
+
+    let all = [&*a, &*b, &*c, &*d, &*e];
+    for node in all {
+        assert_eq!(
+            node.roles(team, &all),
+            [("a", Owner), ("c", Admin), ("e", Member)],
+            "{}",
+            node.name
+        );
+    }
+    // The leavers hold the old key, so it is nobody's current key. They
+    // did not choose the new one.
+    assert_eq!(agree(team, &all), None);
+    assert_eq!(e.write(team, "after").len(), 2);
+    settle(&mut [a, b, c, d, e]);
+    for node in [&*a, &*c, &*e] {
+        assert_eq!(node.texts(team), ["after"], "{}", node.name);
+    }
+    for node in [&*b, &*d] {
+        assert!(node.texts(team).is_empty(), "{}", node.name);
+    }
+}
+
+/// The owner promotes a member that leaves at the same time.
+#[test]
+fn a_leave_beats_a_promotion_it_had_not_seen() {
+    let (team, mut nodes) = team();
+    let [a, b, c, d, e] = &mut nodes;
+
+    let promotion = now(a.log.set_role(team, d.id(), Admin)).unwrap();
+    now(d.log.leave(team)).unwrap();
+    settle(&mut [a, b, c, d, e]);
+
+    let all = [&*a, &*b, &*c, &*d, &*e];
+    for node in all {
+        assert_eq!(
+            node.roles(team, &all),
+            [("a", Owner), ("b", Admin), ("c", Admin), ("e", Member)],
+            "{}",
+            node.name
+        );
+        assert!(!node.log.team(team).unwrap().counted(promotion[0].id));
+    }
+    agree(team, &all);
+    // Whoever knows of the leave can admit the device again.
+    now(b.log.add_member(team, d.id(), Member)).unwrap();
+    settle(&mut [a, b, c, d, e]);
+    assert_eq!(e.log.team(team).unwrap().role(d.id()), Some(Member));
+}
+
+/// A member leaves while an admin removes it.
+#[test]
+fn a_leave_and_a_removal_at_once_agree() {
+    let (team, mut nodes) = team();
+    let [a, b, c, d, e] = &mut nodes;
+
+    d.write(team, "seen");
+    settle(&mut [a, b, c, d, e]);
+    d.write(team, "unseen");
+    now(d.log.leave(team)).unwrap();
+    now(b.log.remove_member(team, d.id())).unwrap();
+    sync(d, e);
+    settle(&mut [a, b, c, d, e]);
+
+    let all = [&*a, &*b, &*c, &*d, &*e];
+    agree(team, &all);
+    for node in all {
+        assert_eq!(
+            node.roles(team, &all),
+            [("a", Owner), ("b", Admin), ("c", Admin), ("e", Member)],
+            "{}",
+            node.name
+        );
+        // The removal had not seen the last write, and it is the removal's
+        // cut that holds.
+        assert_eq!(node.texts(team), ["seen"], "{}", node.name);
+    }
+}
+
+// ── forks ───────────────────────────────────────────────────────────────────
+
+/// A device is put back to a backup and writes on: two entries for one
+/// position of its log.
+#[test]
+fn a_forked_device_is_out_for_good() {
+    let (team, mut nodes) = team();
+    let [a, b, c, d, e] = &mut nodes;
+
+    d.write(team, "one");
+    settle(&mut [a, b, c, d, e]);
+    let backup = d.backup();
+    let at = d.height_of(d.id());
+    d.write(team, "two");
+    sync(d, a);
+    d.restore(&backup);
+    d.write(team, "other");
+    sync(d, c);
+    assert_eq!(a.texts(team), ["one", "two"]);
+    assert_eq!(c.texts(team), ["one", "other"]);
+    settle(&mut [a, b, c, d, e]);
+
+    let all = [&*a, &*b, &*c, &*d, &*e];
+    agree(team, &all);
+    for node in all {
+        assert_eq!(now(node.log.forks()).unwrap()[&d.id()], at);
+        assert_eq!(node.height_of(d.id()), at);
+        assert_eq!(
+            node.roles(team, &all),
+            [("a", Owner), ("b", Admin), ("c", Admin), ("e", Member)],
+            "{}",
+            node.name
+        );
+        // What it wrote before the fork stays.
+        assert_eq!(node.texts(team), ["one"], "{}", node.name);
+    }
+    for (node, text) in [(&*a, "two"), (&*c, "other")] {
+        assert!(node.events.iter().any(|event| matches!(
+            event,
+            Event::Dropped { payload, .. } if payload.data == text.as_bytes()
+        )));
+    }
+    // It cannot write, and nobody can admit it again.
+    assert_eq!(now(d.log.write(team, b"x")), Err(Error::Forked));
+    assert_eq!(
+        now(a.log.add_member(team, d.id(), Member)),
+        Err(Error::NotAllowed)
+    );
+    let admission = a.forge(a.setting(team, d.id(), Member, EntryId(team.0)));
+    assert!(a.log.team(team).unwrap().counted(admission.id));
+    assert_eq!(a.log.team(team).unwrap().role(d.id()), None);
+    // It holds the old key, so the next writer makes a new one.
+    assert_eq!(c.write(team, "new key").len(), 2);
+    settle(&mut [a, b, c, d, e]);
+    assert_eq!(e.texts(team), ["new key", "one"]);
+    assert_eq!(d.texts(team), ["one"]);
+}
+
+/// An admin forks, and each branch removes a different member and reaches
+/// different replicas. Another admin builds on one of the branches.
+#[test]
+fn replicas_that_held_different_branches_agree() {
+    let (team, mut nodes) = team();
+    let [a, b, c, d, e] = &mut nodes;
+    let mut f = Node::new("f");
+    sync(&mut f, c);
+    let backup = b.backup();
+
+    now(b.log.remove_member(team, d.id())).unwrap();
+    sync(b, a);
+    b.restore(&backup);
+    now(b.log.remove_member(team, e.id())).unwrap();
+    sync(b, c);
+    // c has seen the second branch and names its removal in what it does.
+    now(c.log.add_member(team, f.id(), Member)).unwrap();
+    assert_eq!(a.log.team(team).unwrap().role(d.id()), None);
+    assert_eq!(c.log.team(team).unwrap().role(e.id()), None);
+    settle(&mut [a, b, c, d, e, &mut f]);
+
+    let all = [&*a, &*b, &*c, &*d, &*e, &f];
+    agree(team, &all);
+    for node in all {
+        // Neither removal counts, b is out, and c's admission stands
+        // though the operation it built on is gone.
+        assert_eq!(
+            node.roles(team, &all),
+            [
+                ("a", Owner),
+                ("c", Admin),
+                ("d", Member),
+                ("e", Member),
+                ("f", Member)
+            ],
+            "{}",
+            node.name
+        );
+    }
+    d.write(team, "after");
+    settle(&mut [a, b, c, d, e, &mut f]);
+    for node in [&*a, &*c, &*d, &*e, &f] {
+        assert_eq!(node.texts(team), ["after"], "{}", node.name);
+    }
+    assert!(b.texts(team).is_empty());
+}
+
+/// The owner's device forks.
+#[test]
+fn a_forked_owner_leaves_the_team_without_one() {
+    let (team, mut nodes) = team();
+    let [a, b, c, d, e] = &mut nodes;
+    let backup = a.backup();
+
+    a.write(team, "x");
+    sync(a, b);
+    a.restore(&backup);
+    a.write(team, "y");
+    settle(&mut [a, b, c, d, e]);
+
+    let all = [&*a, &*b, &*c, &*d, &*e];
+    agree(team, &all);
+    for node in all {
+        assert_eq!(node.log.team(team).unwrap().owner(), None);
+        assert_eq!(
+            node.roles(team, &all),
+            [("b", Admin), ("c", Admin), ("d", Member), ("e", Member)],
+            "{}",
+            node.name
+        );
+    }
+    // Admins and members go on; nobody makes or removes an admin.
+    now(b.log.remove_member(team, d.id())).unwrap();
+    assert_eq!(
+        now(b.log.set_role(team, e.id(), Admin)),
+        Err(Error::NotAllowed)
+    );
+    assert_eq!(
+        now(b.log.remove_member(team, c.id())),
+        Err(Error::NotAllowed)
+    );
+    c.write(team, "on");
+    settle(&mut [a, b, c, d, e]);
+    assert_eq!(e.texts(team), ["on"]);
 }

@@ -13,6 +13,10 @@
 //!
 //! One member is one device key, as in the p2panda spike. User keys with
 //! device certificates are not part of this.
+//!
+//! A device key must never be restored from a backup and used again: the
+//! restored device continues its log from an old position, which is a fork,
+//! and the device is out of every team for good.
 
 pub mod format;
 pub mod keys;
@@ -40,11 +44,8 @@ pub enum Error {
     },
     /// The entry does not continue the author's log as held.
     Broken,
-    /// The author signed two different entries for one position.
-    Fork {
-        author: DeviceId,
-        seq: u64,
-    },
+    /// This device's own log is forked: nothing it writes counts any more.
+    Forked,
     UnknownTeam,
     /// This device, or the one named, is no member of the team.
     NotMember,
@@ -66,7 +67,7 @@ impl fmt::Display for Error {
             Self::Mismatch => write!(f, "outer fields differ from the signed entry"),
             Self::Gap { have, got } => write!(f, "entry {got} of a log held up to {have}"),
             Self::Broken => write!(f, "the entry does not continue the log"),
-            Self::Fork { author, seq } => write!(f, "{author:?} signed two entries at {seq}"),
+            Self::Forked => write!(f, "this device's log is forked"),
             Self::UnknownTeam => write!(f, "unknown team"),
             Self::NotMember => write!(f, "not a member"),
             Self::AlreadyMember => write!(f, "already a member"),

@@ -531,6 +531,14 @@ impl TeamLog for Replica {
         self.change(output).await
     }
 
+    async fn hand_over(&mut self, _team: TeamId, _member: DeviceId) -> Result<Vec<Entry>, Error> {
+        Err(Error::Backend("p2panda has no owner to hand over".into()))
+    }
+
+    async fn leave(&mut self, _team: TeamId) -> Result<Vec<Entry>, Error> {
+        Err(Error::Backend("leaving is not part of this adapter".into()))
+    }
+
     async fn members(&self, team: TeamId) -> Result<Vec<(DeviceId, Role)>, Error> {
         let id = space_id(team);
         if !self.manager.has_space(id).await.map_err(backend)? {
