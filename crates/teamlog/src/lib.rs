@@ -45,7 +45,7 @@ bytes32!(
     DeviceId
 );
 bytes32!(
-    /// A team, chosen at random by the device that creates it.
+    /// A team, chosen by the implementation when the team is created.
     TeamId
 );
 bytes32!(
@@ -58,8 +58,11 @@ bytes32!(
 pub enum Role {
     /// Reads and writes payloads.
     Member,
-    /// Also adds, removes and changes the role of members.
+    /// Also adds and removes members.
     Admin,
+    /// The device that created the team. Also makes and unmakes admins;
+    /// nobody can remove it or change its role.
+    Owner,
 }
 
 /// One signed entry of one device's log, as it travels between replicas.
@@ -107,6 +110,12 @@ pub enum Event {
     },
     /// A payload became readable.
     Payload {
+        team: TeamId,
+        payload: Payload,
+    },
+    /// A payload that was readable is void after all: a removal that had not
+    /// seen it took effect, so its author was no member when it was written.
+    Dropped {
         team: TeamId,
         payload: Payload,
     },

@@ -95,7 +95,8 @@ fn role(access: &Access<Conditions>) -> Role {
 
 fn access(role: Role) -> Access<Conditions> {
     match role {
-        Role::Admin => Access::manage(),
+        // p2panda has no owner: the creator is a manager like any other.
+        Role::Admin | Role::Owner => Access::manage(),
         Role::Member => Access::write(),
     }
 }
@@ -523,7 +524,7 @@ impl TeamLog for Replica {
         let space = self.joined(team).await?;
         let member = key(member)?;
         let output = match role {
-            Role::Admin => space.promote(member, access(role)).await,
+            Role::Admin | Role::Owner => space.promote(member, access(role)).await,
             Role::Member => space.demote(member, access(role)).await,
         }
         .map_err(backend)?;

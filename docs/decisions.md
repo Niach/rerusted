@@ -69,12 +69,22 @@ Every decision taken and every open question, each with its date and source issu
 | 2026-11-13 | An entry p2panda refuses is kept, counts as tried for the entries that depend on it, and is tried again whenever another entry was applied. Holding it back would hold back every later entry. | #RUST-30 |
 | 2026-11-13 | The adapter keeps its own tables next to p2panda's (log index with state, decrypted payloads, credentials): p2panda's store cannot list the devices it holds logs of and keeps no plaintext. | #RUST-30 |
 | 2026-11-13 | Where p2panda 0.8 behaves differently from #RUST-3, the tests assert what it does and mark it FINDING; they are not bent to pass. | #RUST-30 |
+| 2026-11-14 | Only the owner removes or demotes an admin. Ranks are owner, admin, member; an operation counts only if its author ranks strictly higher than its target and than the role it hands out. The owner is the device that created the team and cannot be removed. This replaces "the owner wins, then seniority". | #RUST-3 |
+| 2026-11-14 | A member that is admitted again does not read what was written while it was out: it gets a new key and none of the old ones. A device new to the team gets every key and reads the whole history. | #RUST-3 |
+| 2026-11-14 | What a member wrote that its removal had not seen is dropped: void on every replica, its own included. A replica that had shown it is told (`Event::Dropped`). | #RUST-3 |
+| 2026-11-14 | One-week spike of our own team log in `identity`, behind the `teamlog` trait, after the research on what could replace p2panda. One member is one device key, as in #RUST-30; user keys, device certificates, invites and the 24 words are not in it. | #RUST-3, #RUST-17 |
+| 2026-11-14 | A removal, an admission and a change of role name a cut: how many entries of the target's log the author held. The new standing applies from the cut on. Every entry names the operation its author acts under, so entries written while removed stay void after a new admission. | #RUST-17 |
+| 2026-11-14 | Concurrent operations: the owner's always count; an admin's operation on a device is void when the owner acted on the same device and neither had seen the other; between admins a removal beats an admission it had not seen. | #RUST-17 |
+| 2026-11-14 | Team key: 32 random bytes named by their hash, sealed per device with HPKE (RFC 9180: X25519, HKDF-SHA256, ChaCha20-Poly1305, crate `hpke`), payloads under XChaCha20-Poly1305. A removal carries the new key in the same entry. The current key is the newest one held by exactly the current members, read from the resolved member list, never from a timestamp; when there is none, the next writer makes one. | #RUST-17 |
+| 2026-11-14 | A key counts as held by every device it was sealed to, also by an operation that is void: an overruled admission has handed the key over all the same. Found by the random test, which had an outsider reading. | #RUST-17 |
+| 2026-11-14 | Entry format version 1: hand-written, big-endian, one canonical encoding, the version byte first and inside the signature; Ed25519 over a context string and the body; the id is SHA-256 of body and signature. `Role::Owner` and `Event::Dropped` are added to the `teamlog` trait; a team's id is the id of its first entry. | #RUST-17, #RUST-29 |
+| 2026-11-14 | `crates/teamlog-p2panda/tests/strict_rank.rs` stays as the record of the comparison: the same rank rule as a `p2panda-auth` 0.8.0 resolver. It passes, through a workaround, and is not a path we take. | #RUST-3 |
 
 ## Open questions
 
 | Date | Question | Source |
 |---|---|---|
-| 2026-11-10/11 | p2panda crates (auth, encryption, spaces) behind our own trait, or our own signed log? The spike (#RUST-30, 2026-11-13) ran and recommends our own log; the report is a comment on #RUST-3. The decision itself is still to be taken. | #RUST-3, #RUST-18, #RUST-30 |
+| 2026-11-10/11 | p2panda crates (auth, encryption, spaces) behind our own trait, or our own signed log? The p2panda spike (#RUST-30, 2026-11-13) recommends our own log. The research of 2026-11-14 found nothing to adopt in its place and recommends the same; the spike of our own log (`identity`) passes the scenario. Whether #RUST-17 now goes ahead as written is still to be confirmed. | #RUST-3, #RUST-18, #RUST-30 |
 | 2026-11-10/11 | Painter: own on Vello, zgui, or gpui. | #RUST-18 (#RUST-8) |
 | 2026-11-10/11 | CI runner: write it ourselves, or build on an existing Rust runner (chimera) and write only the planner? | #RUST-9, #RUST-18 |
 | 2026-11-10/11 | Licence: Apache-2.0 is assumed. Ask before the first merge if it should differ. | #RUST-6, #RUST-18 |
@@ -82,7 +92,9 @@ Every decision taken and every open question, each with its date and source issu
 | 2026-11-10/11 | Label granularity: per provider (`twitter`) or per account and kind? | #RUST-2 |
 | 2026-11-10/11 | Is `allow` per wire enough, or does it need an expiry? | #RUST-2 |
 | 2026-11-10/11 | Dynamic children (one subtree per list item): template in the `view` primitive only, or a `for-each` in compose? | #RUST-2 |
-| 2026-11-10/11 | Concurrent admin actions need one fixed rule (proposal: the owner wins, then seniority in the log). | #RUST-3 |
+| 2026-11-14 | A device that signs two entries for one position of its log is refused by whoever holds the other one, so replicas can end up apart. What is the rule for such a fork? | #RUST-17 |
+| 2026-11-14 | The owner is one device key in the spike. With user keys and device certificates the owner has several devices: how are their concurrent operations ordered, and where is a device's revocation logged so that team entries can be cut by it? | #RUST-17, #RUST-3 |
+| 2026-11-14 | Nobody can remove the owner and the owner cannot hand the team over. Is a transfer of ownership needed, and may a member leave on its own? | #RUST-3 |
 | 2026-11-10/11 | Rented devices hold the team key and are trusted members; the end-to-end claim has to be worded accordingly. | #RUST-3 |
 | 2026-11-10/11 | Recovery when every device is lost and the words too: none. Is that acceptable? | #RUST-3 |
 | 2026-11-10/11 | Is `process` one primitive, or `process` + a separate `window` view primitive? | #RUST-4 |
@@ -94,7 +106,7 @@ Every decision taken and every open question, each with its date and source issu
 | 2026-11-13 | Which machine is the second reference machine? | #RUST-21, #RUST-19 |
 | 2026-11-13 | The commands of tier 1 (nested) and tier 2 (headless) come from the compositor spike and are not in the spec yet. | #RUST-21, #RUST-23 |
 
-Answered: "Light theme now or later?" (#RUST-5) was answered on 2026-11-11 in #RUST-15: dark only for now.
+Answered: "Light theme now or later?" (#RUST-5) was answered on 2026-11-11 in #RUST-15: dark only for now. "Concurrent admin actions need one fixed rule" (#RUST-3) was answered on 2026-11-14: only the owner removes or demotes an admin.
 
 ## Contradictions between issues
 

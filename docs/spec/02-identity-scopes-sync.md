@@ -38,7 +38,7 @@ flowchart TD
 - Trust model: team = secure. Join by invite link or QR only.
 - An invite is a one-time secret plus the team id plus the inviter's address. It expires and works once. The join only becomes valid when an admin device writes the user key into the member log.
 - One symmetric team key, sealed per member, rotated when a member is removed. Enough for small teams.
-- Concurrent admin actions need one fixed rule (proposal: the owner wins, then seniority in the log).
+- Concurrent admin actions follow one fixed rule (decided 2026-11-14): only the owner removes or demotes an admin, so two admins cannot remove each other. Between admins, a removal beats an admission it had not seen.
 - A team's always-on peer is whichever full device is running. If none runs, the team is offline. That is accepted.
 
 ## Scopes
