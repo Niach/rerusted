@@ -95,7 +95,8 @@ fn role(access: &Access<Conditions>) -> Role {
 
 fn access(role: Role) -> Access<Conditions> {
     match role {
-        Role::Admin => Access::manage(),
+        // p2panda has no owner: the creator is a manager like any other.
+        Role::Admin | Role::Owner => Access::manage(),
         Role::Member => Access::write(),
     }
 }
@@ -523,11 +524,19 @@ impl TeamLog for Replica {
         let space = self.joined(team).await?;
         let member = key(member)?;
         let output = match role {
-            Role::Admin => space.promote(member, access(role)).await,
+            Role::Admin | Role::Owner => space.promote(member, access(role)).await,
             Role::Member => space.demote(member, access(role)).await,
         }
         .map_err(backend)?;
         self.change(output).await
+    }
+
+    async fn hand_over(&mut self, _team: TeamId, _member: DeviceId) -> Result<Vec<Entry>, Error> {
+        Err(Error::Backend("p2panda has no owner to hand over".into()))
+    }
+
+    async fn leave(&mut self, _team: TeamId) -> Result<Vec<Entry>, Error> {
+        Err(Error::Backend("leaving is not part of this adapter".into()))
     }
 
     async fn members(&self, team: TeamId) -> Result<Vec<(DeviceId, Role)>, Error> {

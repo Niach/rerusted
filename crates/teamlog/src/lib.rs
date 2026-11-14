@@ -45,7 +45,7 @@ bytes32!(
     DeviceId
 );
 bytes32!(
-    /// A team, chosen at random by the device that creates it.
+    /// A team, chosen by the implementation when the team is created.
     TeamId
 );
 bytes32!(
@@ -58,8 +58,11 @@ bytes32!(
 pub enum Role {
     /// Reads and writes payloads.
     Member,
-    /// Also adds, removes and changes the role of members.
+    /// Also adds and removes members.
     Admin,
+    /// Also makes and unmakes admins. The device that created the team,
+    /// until it hands the team over; nobody can remove it or change its role.
+    Owner,
 }
 
 /// One signed entry of one device's log, as it travels between replicas.
@@ -110,6 +113,12 @@ pub enum Event {
         team: TeamId,
         payload: Payload,
     },
+    /// A payload that was readable is void after all: a removal that had not
+    /// seen it took effect, so its author was no member when it was written.
+    Dropped {
+        team: TeamId,
+        payload: Payload,
+    },
     /// This device was removed from the team.
     Ejected {
         team: TeamId,
@@ -152,6 +161,17 @@ pub trait TeamLog {
         role: Role,
     ) -> Result<Vec<Entry>, Self::Error>;
 
+    /// Makes `member` the owner. This device, the owner until now, stays as
+    /// an admin.
+    async fn hand_over(
+        &mut self,
+        team: TeamId,
+        member: DeviceId,
+    ) -> Result<Vec<Entry>, Self::Error>;
+
+    /// Takes this device out of the team. The owner has to hand over first.
+    async fn leave(&mut self, team: TeamId) -> Result<Vec<Entry>, Self::Error>;
+
     /// The member list as this replica sees it now, sorted by device.
     async fn members(&self, team: TeamId) -> Result<Vec<(DeviceId, Role)>, Self::Error>;
 
@@ -166,6 +186,42 @@ pub trait TeamLog {
 
     /// The entries of `device`'s log from position `from` on, in order.
     async fn entries_after(&self, device: DeviceId, from: u64) -> Result<Vec<Entry>, Self::Error>;
+
+    /// The number of entries held of each device's log and the id of the
+    /// last one. A transport compares it with the other side's: when the id
+    /// at the other's height is not the other's, the two hold different logs
+    /// of that device, and sending it from position 0 lets the other find
+    /// where they part.
+    async fn tips(&self) -> Result<BTreeMap<DeviceId, (u64, EntryId)>, Self::Error> {
+        let mut tips = BTreeMap::new();
+        for (device, height) in self.heights().await? {
+            if let Some(last) = height.checked_sub(1)
+                && let Some(entry) = self.entries_after(device, last).await?.pop()
+            {
+                tips.insert(device, (height, entry.id));
+            }
+        }
+        Ok(tips)
+    }
+
+    /// The devices known to have signed two entries for one position of
+    /// their log, each with the lowest such position. The log of such a
+    /// device is held, and offered, only up to there.
+    async fn forks(&self) -> Result<BTreeMap<DeviceId, u64>, Self::Error> {
+        Ok(BTreeMap::new())
+    }
+
+    /// The two entries that prove the fork of `device`, for
+    /// [`TeamLog::ingest_proof`] on another replica. Proofs travel beside
+    /// the logs: a log cannot carry the proof that it is forked itself.
+    async fn fork_proof(&self, _device: DeviceId) -> Result<Option<Vec<u8>>, Self::Error> {
+        Ok(None)
+    }
+
+    /// Verifies a proof from another replica and applies it.
+    async fn ingest_proof(&mut self, _proof: &[u8]) -> Result<Vec<Event>, Self::Error> {
+        Ok(Vec::new())
+    }
 
     /// Verifies and stores an entry from another replica and applies whatever
     /// became applicable. Ingesting a known entry changes nothing.
