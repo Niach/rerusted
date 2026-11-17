@@ -1,0 +1,11 @@
+# User key, version 1 (crates/identity/src/user.rs).
+# One line per vector: seed | 24 words | user id. Hex is lower case.
+# The first six seeds and their words are from the BIP39 reference vectors.
+# The user ids were computed outside this crate (Python: hashlib, cryptography).
+0000000000000000000000000000000000000000000000000000000000000000 | abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon art | 49e859c2baea1ca9bfe81abe4daede7772fdab7e9afab5a4e166d410936fb2d4
+ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff | zoo zoo zoo zoo zoo zoo zoo zoo zoo zoo zoo zoo zoo zoo zoo zoo zoo zoo zoo zoo zoo zoo zoo vote | 43ec27691760978cfbd627a530ab7869ddcee5e1fdafeb8f4dfd333eaa52ad3e
+7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f | legal winner thank year wave sausage worth useful legal winner thank year wave sausage worth useful legal winner thank year wave sausage worth title | da9b0d2f572968d4a958d10724cf6ba0b1aa043b9b5e3634b48caef7b45fa095
+8080808080808080808080808080808080808080808080808080808080808080 | letter advice cage absurd amount doctor acoustic avoid letter advice cage absurd amount doctor acoustic avoid letter advice cage absurd amount doctor acoustic bless | 929962355c69f91462d4286de5c06a64dd65f8c72cd597db944078ca77f179c3
+68a79eaca2324873eacc50cb9c6eca8cc68ea5d936f98787c60c7ebc74e6ce7c | hamster diagram private dutch cause delay private meat slide toddler razor book happy fancy gospel tennis maple dilemma loan word shrug inflict delay length | d726e5f055ab9787308b7c358612ce31bb57561a2ea0acfac8acb6c28cc18146
+9f6a2878b2520799a44ef18bc7df394e7061a224d2c33cd015b157d746869863 | panda eyebrow bullet gorilla call smoke muffin taste mesh discover soft ostrich alcohol speed nation flash devote level hobby quick inner drive ghost inside | 0dc9c472c757cd34ff85b787d07d43ac55bda4f3988b02cf99080f19a770eb2c
+000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f | abandon amount liar amount expire adjust cage candy arch gather drum bullet absurd math era live bid rhythm alien crouch range attend journey unaware | 241ac6eae0e0f6849a71b9344422b003bb53e74bb413bc4768cae67316ad6747

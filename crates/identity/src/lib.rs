@@ -11,17 +11,24 @@
 //! - [`keys`]: team keys, lockboxes, payload encryption.
 //! - [`Replica`]: the three together behind the `TeamLog` trait.
 //!
-//! One member is one device key, as in the p2panda spike. User keys with
-//! device certificates are not part of this.
+//! - [`user`]: the user's seed, its 24 words and the user key.
+//! - [`certificate`]: the signatures that lead from the user key to a
+//!   device.
+//!
+//! In the log one member is still one device key, as in the p2panda spike:
+//! user keys and certificates exist beside it and the rules do not read
+//! them yet.
 //!
 //! A device key must never be restored from a backup and used again: the
 //! restored device continues its log from an old position, which is a fork,
 //! and the device is out of every team for good.
 
+pub mod certificate;
 pub mod format;
 pub mod keys;
 mod replica;
 pub mod rules;
+pub mod user;
 
 use std::fmt;
 

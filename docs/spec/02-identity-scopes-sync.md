@@ -8,11 +8,12 @@ Draft from the 2026-11-10/11 planning thread. Everything p2p, no server that hol
 ## Identity
 
 ```
-user key  (root, recoverable from 24 words)
+user key  (root, made from the 24 words, stored on no device)
    │ signs
-   ├── device cert: desktop environment
-   ├── device cert: phone
-   └── device cert: CLI daemon
+   └── device cert: first device
+          │ vouches (a device the user has signs for the next one)
+          ├── device cert: phone
+          └── device cert: CLI daemon
 team = signed member log: add | remove | role   (signed by an admin's user key)
      + service devices (CI servers, rented devices) signed by the team
 ```
@@ -22,16 +23,32 @@ team = signed member log: add | remove | role   (signed by an admin's user key)
 ```mermaid
 flowchart TD
   words["24 words (recovery only)"] -. "recovers" .-> user["user key (root)"]
-  user -- "signs" --> de["device cert: desktop environment"]
-  user -- "signs" --> phone["device cert: phone"]
-  user -- "signs" --> cli["device cert: CLI daemon"]
+  user -- "signs" --> de["device cert: first device"]
+  de -- "vouches" --> phone["device cert: phone"]
+  de -- "vouches" --> cli["device cert: CLI daemon"]
   admin["admin's user key"] -- "signs" --> team["team = signed member log: add | remove | role"]
   team -- "signs" --> svc["service devices (CI servers, rented devices)"]
 ```
 
-- Device identity is not user identity. A device has its own key that never leaves it; the user key signs a certificate for it, and each device can be revoked alone.
+- Device identity is not user identity. A device has its own key that never leaves it; the user key signs the certificate of the first one, every later device is vouched for by a device the user already has, and each device can be revoked alone.
 - The 24 words are recovery only (BIP39 over a 32-byte seed, as Brave Sync does). Unlike Brave, the phrase is not the everyday key: a new device is added by scanning a QR on an existing one.
 - One user has exactly one master session and one main chat, on every device.
+
+### The user key and device certificates
+
+Built in the crate `identity` (#RUST-17), modules `user` and `certificate`. Pure: no clock, no storage.
+
+- **Seed.** A user is 32 random bytes. Whoever holds them is the user.
+- **Words.** The seed is shown and typed back as 24 words: BIP39, English list, the seed as the entropy plus 8 checksum bits. A wrong or misplaced word is caught by the checksum. BIP39's second step, which stretches the words into a wallet seed, is not used.
+- **User key.** Ed25519; the secret is SHA-256("rerusted/user/1" ‖ seed). The user id is its public key. It is made from the seed when needed and stored nowhere (decided 2026-11-17): it signs the certificate of the first device, and of a device set up from the words.
+- **Devices vouch for each other.** A new device is added by scanning a QR on a device the user already has; that device signs the new one's certificate. No words are typed.
+- **Device certificate.** 161 bytes: `version (1) | user (32) | device (32) | signer (32) | signature (64)`. The signer is the user key or one of the user's devices, never the device itself; the signature is the signer's over "rerusted/device-certificate/1" and the 97 bytes before it.
+- **Chain.** A device proves itself with the certificates that lead from the user key to it: one count byte, then 1 to 16 certificates. The first is signed by the user key, each later one by the device of the one before, all name the same user, no device comes twice.
+- **No expiry.** A certificate has no validity window and never runs out (decided 2026-11-17). Nothing in the rules reads a clock.
+- **Revocation** is an operation in each team's log (decided 2026-11-14), written by another device of the same user or by anyone who outranks the device. Devices that a revoked device vouched for stay, unless they are revoked too. Not built yet: the team log's rules still treat one device as one member.
+- **Owner.** One of a person's devices acts as owner at a time (decided 2026-11-14); moving the role to another of their devices is a handover.
+
+Test vectors: `crates/identity/tests/vectors/`.
 
 ## Teams
 
@@ -100,6 +117,6 @@ sequenceDiagram
 
 ## Open decisions
 
-1. p2panda crates (auth, encryption, spaces) behind our own trait, or our own signed log? p2panda is pre-1.0 and says its APIs may still break. Proposed: a spike with two devices and a phone (remove a member, rejoin offline) before deciding.
-2. Rented devices hold the team key and are trusted members; the end-to-end claim has to be worded accordingly.
-3. Recovery when every device is lost and the words too: none. Is that acceptable?
+1. Rented devices hold the team key and are trusted members; the end-to-end claim has to be worded accordingly.
+
+Decided since the draft: our own signed log, not p2panda (2026-11-14, #RUST-39). No recovery when every device and the words are lost; onboarding says so when it shows the words (2026-11-13). The seed is on no device and certificates do not run out (2026-11-17, #RUST-17).
