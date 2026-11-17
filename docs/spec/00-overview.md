@@ -130,13 +130,13 @@ Phase 0 is done when:
 - No GTK or Qt compatibility layer: generated themes, portals, compositor decorations.
 - Mint tools are rebuilt by behaviour, never from their code.
 - A team is offline when none of its full devices runs.
+- The team log is our own signed log in `identity`, not p2panda (2026-11-14, #RUST-3, #RUST-39).
+- The painter is gpui (2026-11-13, #RUST-8).
+- The licence is Apache-2.0 (2026-11-13, #RUST-6).
 
 ## Open decisions
 
-1. p2panda or an own signed log (#RUST-3).
-2. Painter: own on Vello, zgui, or gpui (#RUST-8).
-3. CI runner: own or on an existing Rust runner (#RUST-9).
-4. Licence (Apache-2.0 is assumed in #RUST-6).
-5. Base system for the image (#RUST-12).
+1. CI runner: own or on an existing Rust runner (#RUST-9).
+2. Base system for the image (#RUST-12).
 
 All decisions and open questions, with dates and sources: [decisions.md](../decisions.md).

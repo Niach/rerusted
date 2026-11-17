@@ -39,7 +39,7 @@ Every decision taken and every open question, each with its date and source issu
 | 2026-11-13 | The binary the runner launches is a parameter (`--bin`, `--session`). Until #RUST-23 has a compositor the default is sway. | #RUST-22 |
 | 2026-11-13 | Rig images and state live in `~/.cache/rerusted/vm`, outside the checkout, so worktrees share them. Each guest start uses a throwaway overlay on the base image. | #RUST-22 |
 | 2026-11-13 | `target/` is shared by virtiofs and mounted read-only by the guest. The host side enforces it only when the installed virtiofsd has `--readonly`; version 1.10 on the development machine does not. | #RUST-22 |
-| 2026-11-13 | Licence: Apache-2.0, no longer a placeholder. The workspace manifest says so. | #RUST-6 |
+| 2026-11-13 | Licence: Apache-2.0. The workspace manifest says so and the text is in `LICENSE`. | #RUST-6, #RUST-31 |
 | 2026-11-13 | The compositor library is Smithay. | #RUST-20 |
 | 2026-11-13 | The painter is gpui. | #RUST-8 |
 | 2026-11-13 | `unsafe` rule: `forbid` is the workspace default; a crate that needs it overrides it to `deny` in its own manifest, is listed here by name with the reason, keeps `unsafe` in one module with a safety comment per block, and exposes only a safe API. `base`, `graph`, `identity` and `store` never get the exception. | #RUST-6 |
@@ -95,15 +95,13 @@ Every decision taken and every open question, each with its date and source issu
 | 2026-11-17 | The user key is Ed25519 with the secret SHA-256("rerusted/user/1" ‖ seed), the same construction as a device's signing key under another context string. It signs device certificates and no log entry. | #RUST-17 |
 | 2026-11-17 | Device certificate, version 1: 145 bytes, hand-written and big-endian like an entry: version byte first and signed, user, device, `not_before`, `not_after` in seconds since 1970, then the user key's Ed25519 signature over a context string and the body. Valid when `not_before <= now < not_after`; the caller passes the time. | #RUST-17, #RUST-29 |
 | 2026-11-17 | Test vectors are text files in `crates/identity/tests/vectors/`, one per format and version, computed outside the crate where that is possible (Python). | #RUST-17 |
+| 2026-11-17 | The team log is our own signed log in `identity`; p2panda is not used. #RUST-17 goes ahead as written, on the design of the #RUST-39 spike. | #RUST-3, #RUST-17 |
 
 ## Open questions
 
 | Date | Question | Source |
 |---|---|---|
-| 2026-11-10/11 | p2panda crates (auth, encryption, spaces) behind our own trait, or our own signed log? The p2panda spike (#RUST-30, 2026-11-13) recommends our own log. The research of 2026-11-14 found nothing to adopt in its place and recommends the same; the spike of our own log (`identity`) passes the scenario. Whether #RUST-17 now goes ahead as written is still to be confirmed. | #RUST-3, #RUST-18, #RUST-30 |
-| 2026-11-10/11 | Painter: own on Vello, zgui, or gpui. | #RUST-18 (#RUST-8) |
 | 2026-11-10/11 | CI runner: write it ourselves, or build on an existing Rust runner (chimera) and write only the planner? | #RUST-9, #RUST-18 |
-| 2026-11-10/11 | Licence: Apache-2.0 is assumed. Ask before the first merge if it should differ. | #RUST-6, #RUST-18 |
 | 2026-11-10/11 | Base system for the image. | #RUST-18 (#RUST-12) |
 | 2026-11-10/11 | Label granularity: per provider (`twitter`) or per account and kind? | #RUST-2 |
 | 2026-11-10/11 | Is `allow` per wire enough, or does it need an expiry? | #RUST-2 |
@@ -121,15 +119,15 @@ Every decision taken and every open question, each with its date and source issu
 | 2026-11-13 | Which machine is the second reference machine? | #RUST-21, #RUST-19 |
 | 2026-11-13 | The commands of tier 1 (nested) and tier 2 (headless) come from the compositor spike and are not in the spec yet. | #RUST-21, #RUST-23 |
 
-Answered: "Light theme now or later?" (#RUST-5) was answered on 2026-11-11 in #RUST-15: dark only for now. "Concurrent admin actions need one fixed rule" (#RUST-3) was answered on 2026-11-14: only the owner removes or demotes an admin. The three questions the first spike left open (a fork of a device's log, handing the team over, leaving) were answered the same day, see the decisions of #RUST-39.
+Answered: "p2panda behind our own trait, or our own signed log?" (#RUST-3) was answered on 2026-11-14: our own log, built in `identity` (#RUST-39), so #RUST-17 goes ahead as written. "Painter: own on Vello, zgui, or gpui?" (#RUST-8) was answered on 2026-11-13: gpui. "Licence?" (#RUST-6) was answered on 2026-11-13: Apache-2.0. "Light theme now or later?" (#RUST-5) was answered on 2026-11-11 in #RUST-15: dark only for now. "Concurrent admin actions need one fixed rule" (#RUST-3) was answered on 2026-11-14: only the owner removes or demotes an admin. The three questions the first spike left open (a fork of a device's log, handing the team over, leaving) were answered the same day, see the decisions of #RUST-39.
 
 ## Contradictions between issues
 
-Listed, not resolved.
+Listed, not resolved here; an item says so when it was resolved since.
 
 1. **Teams.** #V-1 (2026-11-04): "we dont want the concept of a team in there". #RUST-3 and #RUST-18 (2026-11-10/11) build on teams: the member log, the team key, invites and the `team` scope.
 2. **Server.** #V-1 (2026-11-04): "exponential will get multiplayer and also gets a server". #RUST-18 (2026-11-10/11): "Everything p2p; no server holds state or authority."
 3. **Agents.** #RUST-18 (2026-11-10/11), principle 6: "Only sessions: no separate agent concept." #RUST-2 and #RUST-4 (2026-11-10/11) have an `agent` primitive, and #V-1 (2026-11-04) lists an eAgent library.
 4. **`code` means three things.** The `code` module in #RUST-18, the `code` primitive (a WASM component) in #RUST-4 and #RUST-2, and the `code` interface (repos) in #RUST-4 and #RUST-9 (all 2026-11-10/11).
 5. **Missing reference.** #RUST-9 (2026-11-10/11) defines the Forge events as "the list in #NEW-36", an issue that is not on this board.
-6. **Licence.** #RUST-6 (2026-11-10/11) assumes Apache-2.0 "as for the earlier desktop work"; it is not decided (#RUST-18 open decision 4).
+6. **Licence.** Resolved 2026-11-13: Apache-2.0 (#RUST-6). #RUST-6 (2026-11-10/11) had assumed it "as for the earlier desktop work" while #RUST-18 listed it as open decision 4.

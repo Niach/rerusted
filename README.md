@@ -55,3 +55,7 @@ flowchart TB
 - [`design/`](design/): theme tokens, generated hex, logo
 - [`crates/compositor/`](crates/compositor/README.md): the compositor spike, with the nested and headless commands (tiers 1 and 2 of the dev rig)
 - [`spikes/gpui-shell/`](spikes/gpui-shell/): a gpui window, panel and overlay as clients of the compositor
+
+## Licence
+
+Apache-2.0, see [LICENSE](LICENSE).
