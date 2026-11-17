@@ -54,6 +54,9 @@ Test vectors: `crates/identity/tests/vectors/`.
 
 - Trust model: team = secure. Join by invite link or QR only.
 - An invite is a one-time secret plus the team id plus the inviter's address. It expires and works once. The join only becomes valid when an admin device writes the user key into the member log.
+  - Built in `identity` (#RUST-44). The invite is 105 bytes: `version (1) | team (32) | inviter (32) | expires (u64) | secret (32)`; it travels outside the log, as a link or a QR code. The secret makes a key pair, and the inviter writes the public key and the expiry into its log (entry kind 13), so nobody else learns the secret.
+  - Whoever holds the invite signs a request for one device with that key (161 bytes) and sends it to the inviter. The inviter's device checks the expiry against its own clock and writes the admission (kind 14), which carries the request's signature. Every replica checks that the device asked with that invite, that the inviter wrote the invite into its log before, and that it let nobody in yet. The device comes in as a member; its user's other devices are let in by it.
+  - The admission counts as an admin's admission and under the same rules. The log's rules read no clock: an admin that admits after the expiry breaks no rule that others could check, as it could admit the device without an invite.
 - One symmetric team key, sealed per member, rotated when a member is removed. Enough for small teams.
 - Concurrent admin actions follow one fixed rule (decided 2026-11-14): only the owner removes or demotes an admin, so two admins cannot remove each other. Between admins, a removal beats an admission it had not seen.
 - A team's always-on peer is whichever full device is running. If none runs, the team is offline. That is accepted.

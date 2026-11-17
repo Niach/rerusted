@@ -17,6 +17,7 @@ use teamlog::{DeviceId, Entry, EntryId, Event, Payload, Role, TeamId, TeamLog};
 use crate::Error;
 use crate::certificate;
 use crate::format::{self, Body, FORMAT_VERSION, Kind, Lockbox};
+use crate::invite::{self, Invite, Request};
 use crate::keys::{self, Sealing, TeamKey};
 use crate::rules::{self, Action, Handed, KeyId, Op, Team};
 use crate::user::UserId;
@@ -115,6 +116,9 @@ pub struct Replica {
     /// The user each device belongs to, by the first certificate chain it
     /// published.
     users: BTreeMap<DeviceId, UserId>,
+    /// The invites each device wrote into its log, by their public key:
+    /// the team, the expiry, and whether one let a device in already.
+    invites: BTreeMap<(DeviceId, [u8; 32]), (TeamId, u64, bool)>,
     teams: BTreeMap<TeamId, TeamState>,
 }
 
@@ -137,6 +141,7 @@ impl Replica {
             anchors: BTreeMap::new(),
             announced: BTreeMap::new(),
             users: BTreeMap::new(),
+            invites: BTreeMap::new(),
             teams: BTreeMap::new(),
         }
     }
@@ -354,6 +359,50 @@ impl Replica {
                 (under, parents, Action::Revoke { member, cut }, key),
                 boxes,
             ),
+            Kind::Invite {
+                team,
+                under,
+                parents,
+                invite,
+                expires,
+            } => {
+                self.invites
+                    .entry((author, invite))
+                    .or_insert((team, expires, false));
+                (team, (under, parents, Action::Note, None), Vec::new())
+            }
+            Kind::Join {
+                team,
+                under,
+                parents,
+                member,
+                cut,
+                invite,
+                asked,
+                key,
+                boxes,
+            } => {
+                // An admission by its author, if the device asked with an
+                // invite that the author wrote into its log before, for
+                // this team, and that let nobody in yet. Else nothing, and
+                // no key either.
+                let holds = self
+                    .invites
+                    .get_mut(&(author, invite))
+                    .filter(|(of, _, used)| *of == team && !*used)
+                    .filter(|_| invite::asked(team, &invite, member, &asked))
+                    .map(|(.., used)| *used = true)
+                    .is_some();
+                let role = Role::Member;
+                match holds {
+                    true => (
+                        team,
+                        (under, parents, Action::Set { member, role, cut }, key),
+                        boxes,
+                    ),
+                    false => (team, (under, parents, Action::Note, None), Vec::new()),
+                }
+            }
         };
         let (under, parents, action, new_key) = op;
         let state = self.teams.entry(team).or_default();
@@ -584,6 +633,7 @@ impl Replica {
 
         self.announced.clear();
         self.users.clear();
+        self.invites.clear();
         self.anchors.clear();
         for state in self.teams.values_mut() {
             state.ops.clear();
@@ -679,6 +729,88 @@ impl Replica {
             handover: handover.bytes.clone(),
         };
         vec![self.append(kind)]
+    }
+
+    /// Gives out an invite to the team that works until `expires`, in
+    /// seconds since 1970, and writes its public key into the log. The
+    /// invite goes to the invited outside the log; whoever holds it can ask
+    /// once to be let in. Only an admin's invite lets anybody in.
+    pub fn invite(&mut self, team: TeamId, expires: u64) -> Result<(Invite, Vec<Entry>), Error> {
+        self.ready()?;
+        let mut entries = self.accept(team);
+        let resolved = self.resolved(team)?;
+        if resolved.role(self.device) < Some(Role::Admin) {
+            return Err(Error::NotAllowed);
+        }
+        let invite = Invite::new(team, self.device, expires);
+        let kind = Kind::Invite {
+            team,
+            under: self.admin_grant(team)?,
+            parents: resolved.parents().to_vec(),
+            invite: invite.key(),
+            expires,
+        };
+        entries.push(self.append(kind));
+        Ok((invite, entries))
+    }
+
+    /// Lets in, as a member, the device that asks with an invite of this
+    /// device's. `now`, in seconds since 1970, is the caller's clock: this
+    /// is the one place an invite's expiry is checked. The device has to
+    /// have announced itself, as for any admission.
+    pub fn join(&mut self, request: &[u8], now: u64) -> Result<Vec<Entry>, Error> {
+        self.ready()?;
+        let request = Request::open(request)?;
+        let (team, member) = (request.team, request.device);
+        let Some((of, expires, used)) = self.invites.get(&(self.device, request.invite)).copied()
+        else {
+            return Err(Error::UnknownInvite);
+        };
+        if of != team {
+            return Err(Error::UnknownInvite);
+        }
+        if used {
+            return Err(Error::Used);
+        }
+        if now >= expires {
+            return Err(Error::Expired);
+        }
+        let mut entries = self.accept(team);
+        let resolved = self.resolved(team)?;
+        if resolved.role(member).is_some() {
+            return Err(Error::AlreadyMember);
+        }
+        if !resolved.may(self.device, member, Some(Role::Member))
+            || self.forks.contains_key(&member)
+        {
+            return Err(Error::NotAllowed);
+        }
+        // As for any admission: a device that was in before gets a new key
+        // and none of the old ones, a new device gets them all.
+        let (key, boxes) = if resolved.was_member(member) {
+            let key = keys::new_key();
+            let devices = resolved.members().keys().copied().chain([member]);
+            (Some(keys::key_id(&key)), self.boxes(&key, devices)?)
+        } else {
+            let mut boxes = Vec::new();
+            for key in self.teams[&team].keys.values() {
+                boxes.extend(self.boxes(key, [member])?);
+            }
+            (None, boxes)
+        };
+        let kind = Kind::Join {
+            team,
+            under: self.admin_grant(team)?,
+            parents: resolved.parents().to_vec(),
+            member,
+            cut: self.height(member),
+            invite: request.invite,
+            asked: request.signature,
+            key,
+            boxes,
+        };
+        entries.push(self.append(kind));
+        Ok(entries)
     }
 
     /// Publishes this device's certificate chain, so that others know which

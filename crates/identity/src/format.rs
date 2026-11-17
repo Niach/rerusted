@@ -25,6 +25,11 @@
 //! 10 certify = u16 length, chain                            the author's certificate chain
 //! 11 admit   = team under parents member role cut flag [key] boxes
 //! 12 revoke  = team under parents member cut flag [key] boxes
+//! 13 invite  = team under parents invite expires            invite: 32 bytes, the invite's
+//!                                                           public key; expires: u64
+//! 14 join    = team under parents member cut invite asked flag [key] boxes
+//!                                                           asked: 64 bytes, the invite key's
+//!                                                           signature of the request
 //!
 //! team, under, member, key = 32 bytes each
 //! parents    = u16 count, then (device, seq, id) of 32, 8 and 32 bytes,
@@ -150,6 +155,28 @@ pub enum Kind {
         member: DeviceId,
         role: Role,
         cut: u64,
+        key: Option<KeyId>,
+        boxes: Vec<Lockbox>,
+    },
+    /// An invite the author gave out: its public key and its expiry.
+    Invite {
+        team: TeamId,
+        under: EntryId,
+        parents: Vec<Parent>,
+        invite: [u8; 32],
+        expires: u64,
+    },
+    /// Admits, as a member, the device that asked with an invite of the
+    /// author's.
+    Join {
+        team: TeamId,
+        under: EntryId,
+        parents: Vec<Parent>,
+        member: DeviceId,
+        cut: u64,
+        invite: [u8; 32],
+        /// The signature of the request.
+        asked: [u8; 64],
         key: Option<KeyId>,
         boxes: Vec<Lockbox>,
     },
@@ -378,6 +405,42 @@ impl Body {
                 put_key(&mut out, key);
                 put_boxes(&mut out, boxes);
             }
+            Kind::Invite {
+                team,
+                under,
+                parents,
+                invite,
+                expires,
+            } => {
+                out.push(13);
+                out.extend_from_slice(&team.0);
+                out.extend_from_slice(&under.0);
+                put_parents(&mut out, parents);
+                out.extend_from_slice(invite);
+                out.extend_from_slice(&expires.to_be_bytes());
+            }
+            Kind::Join {
+                team,
+                under,
+                parents,
+                member,
+                cut,
+                invite,
+                asked,
+                key,
+                boxes,
+            } => {
+                out.push(14);
+                out.extend_from_slice(&team.0);
+                out.extend_from_slice(&under.0);
+                put_parents(&mut out, parents);
+                out.extend_from_slice(&member.0);
+                out.extend_from_slice(&cut.to_be_bytes());
+                out.extend_from_slice(invite);
+                out.extend_from_slice(asked);
+                put_key(&mut out, key);
+                put_boxes(&mut out, boxes);
+            }
         }
         out
     }
@@ -566,6 +629,24 @@ fn decode_body(bytes: &[u8]) -> Result<Body, Error> {
             parents: r.parents()?,
             member: DeviceId(r.array()?),
             cut: r.u64()?,
+            key: r.key()?,
+            boxes: r.boxes()?,
+        },
+        13 => Kind::Invite {
+            team: TeamId(r.array()?),
+            under: EntryId(r.array()?),
+            parents: r.parents()?,
+            invite: r.array()?,
+            expires: r.u64()?,
+        },
+        14 => Kind::Join {
+            team: TeamId(r.array()?),
+            under: EntryId(r.array()?),
+            parents: r.parents()?,
+            member: DeviceId(r.array()?),
+            cut: r.u64()?,
+            invite: r.array()?,
+            asked: r.array()?,
             key: r.key()?,
             boxes: r.boxes()?,
         },

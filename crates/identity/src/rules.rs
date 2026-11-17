@@ -179,6 +179,9 @@ pub enum Action {
         member: DeviceId,
         cut: u64,
     },
+    /// Changes nothing in the team: an invite given out, or an admission
+    /// with an invite that does not hold.
+    Note,
     /// Takes the author out.
     Leave,
     /// Introduces a key and changes nothing else.
