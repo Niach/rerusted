@@ -12,6 +12,7 @@
 //! - [`Replica`]: the three together behind the `TeamLog` trait.
 //!
 //! - [`user`]: the user's seed, its 24 words and the user key.
+//! - [`invite`]: the secret somebody is asked into a team with.
 //! - [`certificate`]: the signatures that lead from the user key to a
 //!   device.
 //!
@@ -26,6 +27,7 @@
 
 pub mod certificate;
 pub mod format;
+pub mod invite;
 pub mod keys;
 mod replica;
 pub mod rules;
@@ -64,6 +66,12 @@ pub enum Error {
     NotAnnounced(DeviceId),
     /// The device's sealing key cannot be used.
     Sealing(DeviceId),
+    /// This device wrote no such invite.
+    UnknownInvite,
+    /// The invite's time is over.
+    Expired,
+    /// The invite has let a device in already.
+    Used,
 }
 
 impl fmt::Display for Error {
@@ -82,6 +90,9 @@ impl fmt::Display for Error {
             Self::NotAllowed => write!(f, "not allowed by the team's rules"),
             Self::NotAnnounced(device) => write!(f, "{device:?} has not announced"),
             Self::Sealing(device) => write!(f, "cannot seal to {device:?}"),
+            Self::UnknownInvite => write!(f, "no such invite of this device"),
+            Self::Expired => write!(f, "the invite has run out"),
+            Self::Used => write!(f, "the invite was used before"),
         }
     }
 }
