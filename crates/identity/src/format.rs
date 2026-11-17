@@ -22,6 +22,9 @@
 //! 7 leave    = team under parents
 //! 8 accept   = team under parents u32 length, entry       the handover, whole
 //! 9 claim    = team under parents owner                     owner: 32 bytes, the forked owner
+//! 10 certify = u16 length, chain                            the author's certificate chain
+//! 11 admit   = team under parents member role cut flag [key] boxes
+//! 12 revoke  = team under parents member cut flag [key] boxes
 //!
 //! team, under, member, key = 32 bytes each
 //! parents    = u16 count, then (device, seq, id) of 32, 8 and 32 bytes,
@@ -134,6 +137,31 @@ pub enum Kind {
         parents: Vec<Parent>,
         /// The owner whose fork left the team without one.
         owner: DeviceId,
+    },
+    /// The author's certificate chain: which user it is a device of.
+    Certify {
+        chain: Vec<u8>,
+    },
+    /// Admits a device of the author's own user.
+    Admit {
+        team: TeamId,
+        under: EntryId,
+        parents: Vec<Parent>,
+        member: DeviceId,
+        role: Role,
+        cut: u64,
+        key: Option<KeyId>,
+        boxes: Vec<Lockbox>,
+    },
+    /// Takes a device of the author's own user out.
+    Revoke {
+        team: TeamId,
+        under: EntryId,
+        parents: Vec<Parent>,
+        member: DeviceId,
+        cut: u64,
+        key: Option<KeyId>,
+        boxes: Vec<Lockbox>,
     },
 }
 
@@ -307,6 +335,49 @@ impl Body {
                 put_parents(&mut out, parents);
                 out.extend_from_slice(&owner.0);
             }
+            Kind::Certify { chain } => {
+                out.push(10);
+                out.extend_from_slice(&(chain.len() as u16).to_be_bytes());
+                out.extend_from_slice(chain);
+            }
+            Kind::Admit {
+                team,
+                under,
+                parents,
+                member,
+                role,
+                cut,
+                key,
+                boxes,
+            } => {
+                out.push(11);
+                out.extend_from_slice(&team.0);
+                out.extend_from_slice(&under.0);
+                put_parents(&mut out, parents);
+                out.extend_from_slice(&member.0);
+                out.push(*role as u8);
+                out.extend_from_slice(&cut.to_be_bytes());
+                put_key(&mut out, key);
+                put_boxes(&mut out, boxes);
+            }
+            Kind::Revoke {
+                team,
+                under,
+                parents,
+                member,
+                cut,
+                key,
+                boxes,
+            } => {
+                out.push(12);
+                out.extend_from_slice(&team.0);
+                out.extend_from_slice(&under.0);
+                put_parents(&mut out, parents);
+                out.extend_from_slice(&member.0);
+                out.extend_from_slice(&cut.to_be_bytes());
+                put_key(&mut out, key);
+                put_boxes(&mut out, boxes);
+            }
         }
         out
     }
@@ -468,6 +539,35 @@ fn decode_body(bytes: &[u8]) -> Result<Body, Error> {
             under: EntryId(r.array()?),
             parents: r.parents()?,
             owner: DeviceId(r.array()?),
+        },
+        10 => Kind::Certify {
+            chain: {
+                let len = r.u16()?;
+                r.take(len)?.to_vec()
+            },
+        },
+        11 => Kind::Admit {
+            team: TeamId(r.array()?),
+            under: EntryId(r.array()?),
+            parents: r.parents()?,
+            member: DeviceId(r.array()?),
+            role: match r.u8()? {
+                0 => Role::Member,
+                1 => Role::Admin,
+                _ => return Err(Error::Malformed("role")),
+            },
+            cut: r.u64()?,
+            key: r.key()?,
+            boxes: r.boxes()?,
+        },
+        12 => Kind::Revoke {
+            team: TeamId(r.array()?),
+            under: EntryId(r.array()?),
+            parents: r.parents()?,
+            member: DeviceId(r.array()?),
+            cut: r.u64()?,
+            key: r.key()?,
+            boxes: r.boxes()?,
         },
         _ => return Err(Error::Malformed("kind")),
     };

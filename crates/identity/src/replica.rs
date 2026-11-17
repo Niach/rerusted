@@ -15,9 +15,11 @@ use ed25519_dalek::SigningKey;
 use teamlog::{DeviceId, Entry, EntryId, Event, Payload, Role, TeamId, TeamLog};
 
 use crate::Error;
+use crate::certificate;
 use crate::format::{self, Body, FORMAT_VERSION, Kind, Lockbox};
 use crate::keys::{self, Sealing, TeamKey};
 use crate::rules::{self, Action, Handed, KeyId, Op, Team};
+use crate::user::UserId;
 
 /// A device that signed two entries for one position.
 struct Fork {
@@ -92,6 +94,8 @@ fn handed(team: TeamId, acceptor: DeviceId, handover: &[u8]) -> Result<Handed, E
 /// What an entry added to a team.
 enum Change {
     Nothing,
+    /// A device said which user it belongs to: every team may differ.
+    Users,
     Op(TeamId),
     Payload(TeamId),
 }
@@ -108,6 +112,9 @@ pub struct Replica {
     anchors: BTreeMap<(DeviceId, u64), (EntryId, Vec<u8>)>,
     /// The sealing key each device announced.
     announced: BTreeMap<DeviceId, [u8; 32]>,
+    /// The user each device belongs to, by the first certificate chain it
+    /// published.
+    users: BTreeMap<DeviceId, UserId>,
     teams: BTreeMap<TeamId, TeamState>,
 }
 
@@ -129,6 +136,7 @@ impl Replica {
             forks: BTreeMap::new(),
             anchors: BTreeMap::new(),
             announced: BTreeMap::new(),
+            users: BTreeMap::new(),
             teams: BTreeMap::new(),
         }
     }
@@ -211,6 +219,14 @@ impl Replica {
             Kind::Announce { sealing } => {
                 self.announced.entry(author).or_insert(sealing);
                 return Change::Nothing;
+            }
+            Kind::Certify { chain } => {
+                let user = certificate::named_user(&chain).expect("checked when taken");
+                if self.users.contains_key(&author) {
+                    return Change::Nothing;
+                }
+                self.users.insert(author, user);
+                return Change::Users;
             }
             Kind::Payload {
                 team,
@@ -311,6 +327,33 @@ impl Replica {
                 (under, parents, Action::Claim { owner }, None),
                 Vec::new(),
             ),
+            Kind::Admit {
+                team,
+                under,
+                parents,
+                member,
+                role,
+                cut,
+                key,
+                boxes,
+            } => (
+                team,
+                (under, parents, Action::Admit { member, role, cut }, key),
+                boxes,
+            ),
+            Kind::Revoke {
+                team,
+                under,
+                parents,
+                member,
+                cut,
+                key,
+                boxes,
+            } => (
+                team,
+                (under, parents, Action::Revoke { member, cut }, key),
+                boxes,
+            ),
         };
         let (under, parents, action, new_key) = op;
         let state = self.teams.entry(team).or_default();
@@ -343,6 +386,13 @@ impl Replica {
         let mut events = Vec::new();
         let team = match change {
             Change::Nothing => return events,
+            Change::Users => {
+                let teams: Vec<TeamId> = self.teams.keys().copied().collect();
+                return teams
+                    .into_iter()
+                    .flat_map(|team| self.resolve(team))
+                    .collect();
+            }
             Change::Payload(team) => {
                 let state = self.teams.get_mut(&team).expect("filed under the team");
                 let written = state.written.last().expect("just filed");
@@ -368,7 +418,7 @@ impl Replica {
         let forks = self.forks.iter().map(|(device, fork)| (*device, fork.at));
         let forks: BTreeMap<DeviceId, u64> = forks.collect();
         let state = self.teams.get_mut(&team).expect("filed under the team");
-        state.resolved = rules::resolve(team, &state.ops, &forks);
+        state.resolved = rules::resolve(team, &state.ops, &forks, &self.users);
 
         let members = state
             .resolved
@@ -498,6 +548,10 @@ impl Replica {
             }
             _ => None,
         };
+        // A chain has to lead from a user's key to the author.
+        if let Kind::Certify { chain } = &body.kind {
+            certificate::user_of(chain, body.author)?;
+        }
         let anchored = self
             .anchors
             .get(&(body.author, body.seq))
@@ -529,6 +583,7 @@ impl Replica {
         }
 
         self.announced.clear();
+        self.users.clear();
         self.anchors.clear();
         for state in self.teams.values_mut() {
             state.ops.clear();
@@ -624,6 +679,115 @@ impl Replica {
             handover: handover.bytes.clone(),
         };
         vec![self.append(kind)]
+    }
+
+    /// Publishes this device's certificate chain, so that others know which
+    /// user it belongs to. The first one a device publishes counts.
+    pub fn certify(&mut self, chain: &[u8]) -> Result<Vec<Entry>, Error> {
+        self.ready()?;
+        certificate::user_of(chain, self.device)?;
+        if self.users.contains_key(&self.device) {
+            return Ok(Vec::new());
+        }
+        Ok(vec![self.append(Kind::Certify {
+            chain: chain.to_vec(),
+        })])
+    }
+
+    /// The user `device` belongs to, once it has published its chain.
+    pub fn user(&self, device: DeviceId) -> Option<UserId> {
+        self.users.get(&device).copied()
+    }
+
+    /// Whether `device` is another device of this device's user.
+    fn sibling(&self, device: DeviceId) -> bool {
+        device != self.device
+            && self
+                .user(self.device)
+                .is_some_and(|user| self.user(device) == Some(user))
+    }
+
+    /// Lets `member`, another device of this device's user, into the team,
+    /// in a role no higher than this device's own; the owner's device
+    /// admits it as admin at most. No admin of the team has to act.
+    pub fn admit(
+        &mut self,
+        team: TeamId,
+        member: DeviceId,
+        role: Role,
+    ) -> Result<Vec<Entry>, Error> {
+        self.ready()?;
+        let mut entries = self.accept(team);
+        let resolved = self.resolved(team)?;
+        if resolved.role(member).is_some() {
+            return Err(Error::AlreadyMember);
+        }
+        let mine = resolved.role(self.device).ok_or(Error::NotMember)?;
+        if !self.sibling(member)
+            || role == Role::Owner
+            || mine < role
+            || self.forks.contains_key(&member)
+        {
+            return Err(Error::NotAllowed);
+        }
+        // As for any admission: a device that was in before gets a new key
+        // and none of the old ones, a new device gets them all.
+        let (key, boxes) = if resolved.was_member(member) {
+            let key = keys::new_key();
+            let devices = resolved.members().keys().copied().chain([member]);
+            (Some(keys::key_id(&key)), self.boxes(&key, devices)?)
+        } else {
+            let mut boxes = Vec::new();
+            for key in self.teams[&team].keys.values() {
+                boxes.extend(self.boxes(key, [member])?);
+            }
+            (None, boxes)
+        };
+        let kind = Kind::Admit {
+            team,
+            under: resolved.member_grant(self.device).ok_or(Error::NotMember)?,
+            parents: resolved.parents().to_vec(),
+            member,
+            role,
+            cut: self.height(member),
+            key,
+            boxes,
+        };
+        entries.push(self.append(kind));
+        Ok(entries)
+    }
+
+    /// Takes `member`, another device of this device's user, out of the
+    /// team, whatever the two devices' roles, and changes the key. When
+    /// `member` is the owner, this device is the owner from here on.
+    pub fn revoke(&mut self, team: TeamId, member: DeviceId) -> Result<Vec<Entry>, Error> {
+        self.ready()?;
+        let mut entries = self.accept(team);
+        let resolved = self.resolved(team)?;
+        if resolved.role(member).is_none() {
+            return Err(Error::NotMember);
+        }
+        let under = resolved.member_grant(self.device).ok_or(Error::NotMember)?;
+        if !self.sibling(member) {
+            return Err(Error::NotAllowed);
+        }
+        let key = keys::new_key();
+        let remaining = resolved
+            .members()
+            .keys()
+            .copied()
+            .filter(|device| *device != member);
+        let kind = Kind::Revoke {
+            team,
+            under,
+            parents: resolved.parents().to_vec(),
+            member,
+            cut: self.height(member),
+            key: Some(keys::key_id(&key)),
+            boxes: self.boxes(&key, remaining)?,
+        };
+        entries.push(self.append(kind));
+        Ok(entries)
     }
 
     /// Takes over a team whose owner forked. Only the admin that has been

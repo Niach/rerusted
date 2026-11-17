@@ -180,3 +180,82 @@ const CLAIM: &str = "\
     88eedc66e930aa2a5f331ded72fc66aea2b5649bc24e58db2d1ddbbf6577cbb6\
     8c721e236512c792c223f25591608e876ebb27f0bebaaf057992b49eb9a5ca04";
 const CLAIM_ID: &str = "c3b9e04fceeef5fc269bcb758baf643e1d8187155bebb339f56033e548df4b3f";
+
+/// Test vectors for the entries among one user's devices: kinds 10, 11
+/// and 12.
+#[test]
+fn device_entry_vectors() {
+    use identity::format::Lockbox;
+    use identity::rules::{KeyId, Parent};
+    use teamlog::{Role, TeamId};
+
+    let unhex = |text: &str| -> Vec<u8> {
+        (0..text.len())
+            .step_by(2)
+            .map(|at| u8::from_str_radix(&text[at..at + 2], 16).unwrap())
+            .collect()
+    };
+    let certificates = include_str!("vectors/certificate-v1.txt");
+    let chain = unhex(certificates.lines().last().unwrap().trim());
+    let seed: [u8; 32] = std::array::from_fn(|i| i as u8);
+    let mut replica = Replica::from_seed(seed);
+    let announce = now(replica.announce()).unwrap().remove(0);
+    let (team, under) = (TeamId([1; 32]), EntryId([2; 32]));
+    let parents = vec![Parent {
+        device: DeviceId([3; 32]),
+        seq: 4,
+        id: EntryId([5; 32]),
+    }];
+    let boxes = vec![Lockbox {
+        key: KeyId([8; 32]),
+        device: DeviceId([6; 32]),
+        sealed: vec![0xaa, 0xbb, 0xcc],
+    }];
+    let kinds = [
+        ("certify", Kind::Certify { chain }),
+        (
+            "admit",
+            Kind::Admit {
+                team,
+                under,
+                parents: parents.clone(),
+                member: DeviceId([6; 32]),
+                role: Role::Admin,
+                cut: 7,
+                key: Some(KeyId([8; 32])),
+                boxes: boxes.clone(),
+            },
+        ),
+        (
+            "revoke",
+            Kind::Revoke {
+                team,
+                under,
+                parents,
+                member: DeviceId([6; 32]),
+                cut: 7,
+                key: Some(KeyId([8; 32])),
+                boxes,
+            },
+        ),
+    ];
+    let vectors: Vec<Vec<&str>> = include_str!("vectors/devices-v1.txt")
+        .lines()
+        .filter(|line| !line.starts_with('#') && !line.is_empty())
+        .map(|line| line.split('|').map(str::trim).collect())
+        .collect();
+    assert_eq!(vectors.len(), kinds.len());
+    for ((name, kind), vector) in kinds.into_iter().zip(vectors) {
+        assert_eq!(name, vector[0]);
+        let body = Body {
+            author: announce.author,
+            seq: 1,
+            prev: announce.id,
+            kind,
+        };
+        let bytes = format::seal(&body, &keys::signing_key(&seed));
+        assert_eq!(hex(&bytes), vector[1], "{name}");
+        assert_eq!(hex(&format::id(&bytes).0), vector[2], "{name}");
+        assert_eq!(format::open(&bytes), Ok(body), "{name}");
+    }
+}

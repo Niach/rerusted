@@ -218,3 +218,56 @@ pub fn settle(nodes: &mut [&mut Node]) {
         }
     }
 }
+
+/// Makes the nodes the devices of one new user: the user key certifies the
+/// first, each later one is vouched for by the one before it. Every device
+/// publishes its chain.
+pub fn one_user(nodes: &mut [&mut Node]) -> identity::user::UserId {
+    use identity::certificate;
+    let key = identity::user::Seed::generate().user_key();
+    let mut certificates: Vec<Vec<u8>> = Vec::new();
+    for at in 0..nodes.len() {
+        let certificate = match at {
+            0 => key.certify(nodes[0].id()),
+            _ => certificate::vouch(
+                &keys::signing_key(&nodes[at - 1].log.seed()),
+                key.id(),
+                nodes[at].id(),
+            ),
+        };
+        certificates.push(certificate.unwrap());
+        let chain = certificate::chain(&certificates).unwrap();
+        nodes[at].log.certify(&chain).unwrap();
+    }
+    key.id()
+}
+
+impl Node {
+    /// A revocation as a device of the same user would write it now,
+    /// whether or not this device may.
+    pub fn revocation(&self, team: TeamId, member: DeviceId, under: EntryId) -> Kind {
+        Kind::Revoke {
+            team,
+            under,
+            parents: self.log.team(team).unwrap().parents().to_vec(),
+            member,
+            cut: self.height_of(member),
+            key: None,
+            boxes: Vec::new(),
+        }
+    }
+
+    /// An admission of one's own device, likewise.
+    pub fn admission(&self, team: TeamId, member: DeviceId, role: Role, under: EntryId) -> Kind {
+        Kind::Admit {
+            team,
+            under,
+            parents: self.log.team(team).unwrap().parents().to_vec(),
+            member,
+            role,
+            cut: self.height_of(member),
+            key: None,
+            boxes: Vec::new(),
+        }
+    }
+}

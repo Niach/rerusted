@@ -173,3 +173,20 @@ pub fn verify(chain: &[u8], user: UserId, device: DeviceId) -> Result<Vec<Certif
     }
     Ok(certificates)
 }
+
+/// The user a chain says `device` belongs to: the user its first certificate
+/// names, once the whole chain is checked against that user's key.
+pub fn user_of(chain: &[u8], device: DeviceId) -> Result<UserId, Error> {
+    let first = chain
+        .get(1..1 + CERTIFICATE_LEN)
+        .ok_or(Error::Malformed("chain length"))?;
+    let user = Certificate::open(first)?.user;
+    verify(chain, user, device)?;
+    Ok(user)
+}
+
+/// The user the first certificate of a chain names, read without checking
+/// anything: for a chain that [`user_of`] has accepted before.
+pub(crate) fn named_user(chain: &[u8]) -> Option<UserId> {
+    Some(UserId(chain.get(2..34)?.try_into().ok()?))
+}

@@ -45,6 +45,31 @@ fn act(
     let other = nodes[j].id();
     let role = if random.below(3) == 0 { Admin } else { Member };
     let node = &mut nodes[i];
+    // What a user's devices do to each other. Honest calls are refused
+    // unless the two are one user's; forged ones are written anyway.
+    match random.below(12) {
+        0 => {
+            let _ = node.log.admit(team, other, role);
+        }
+        1 => {
+            let _ = node.log.revoke(team, other);
+        }
+        2 => {
+            if let Some(resolved) = node.log.team(team) {
+                let under = [
+                    resolved.member_grant(node.id()),
+                    resolved.admin_grant(node.id()),
+                ][random.below(2)]
+                .unwrap_or(EntryId(team.0));
+                let kind = match random.below(2) {
+                    0 => node.admission(team, other, role, under),
+                    _ => node.revocation(team, other, under),
+                };
+                node.forge(kind);
+            }
+        }
+        _ => {}
+    }
     // Whoever is the heir of a forked owner tends to take the team over.
     if random.below(3) == 0 {
         let _ = node.log.take_over(team);
@@ -175,11 +200,19 @@ fn shuffled(random: &mut Random, entries: Vec<Entry>) -> Vec<Entry> {
 }
 
 /// Returns whether a device forked and whether the team changed owner.
-fn run(seed: u64) -> (bool, bool, bool) {
+fn run(seed: u64) -> (bool, bool, bool, bool) {
     let mut random = Random(seed.wrapping_mul(0x9e37_79b9_7f4a_7c15) | 1);
     let mut nodes = NAMES.map(Node::new);
     {
         let [a, b, c, d, e, f] = &mut nodes;
+        settle(&mut [a, b, c, d, e, f]);
+    }
+    // a and b are one user's devices, c, d and e another's; f never says
+    // whose it is.
+    {
+        let [a, b, c, d, e, f] = &mut nodes;
+        common::one_user(&mut [a, b]);
+        common::one_user(&mut [c, d, e]);
         settle(&mut [a, b, c, d, e, f]);
     }
     let (team, _) = now(nodes[0].log.create_team()).unwrap();
@@ -310,6 +343,14 @@ fn run(seed: u64) -> (bool, bool, bool) {
             assert!(read.is_empty(), "{seed} {}", node.name);
         }
     }
+    // Whether something a user's devices did to each other counts.
+    let among = nodes[0].log.entries().iter().any(|entry| {
+        nodes[0].log.team(team).unwrap().counted(entry.id)
+            && matches!(
+                identity::format::read(&entry.bytes).map(|body| body.kind),
+                Ok(Kind::Admit { .. } | Kind::Revoke { .. })
+            )
+    });
     // Whether an admin took the team over after an owner's fork.
     let resolved = nodes[0].log.team(team).unwrap();
     let claimed = nodes[0].log.entries().iter().any(|entry| {
@@ -323,27 +364,32 @@ fn run(seed: u64) -> (bool, bool, bool) {
         !forks.is_empty(),
         owner.is_some_and(|owner| owner != nodes[0].id()),
         claimed,
+        among,
     )
 }
 
 #[test]
 fn replicas_agree_whatever_happened() {
     // More with `SEEDS=5000 cargo test --release -p identity --test converge`.
-    let seeds = std::env::var("SEEDS").map_or(40, |seeds| seeds.parse().unwrap());
-    let (mut forked, mut handed, mut claimed) = (0, 0, 0);
+    let seeds = std::env::var("SEEDS").map_or(400, |seeds| seeds.parse().unwrap());
+    let (mut forked, mut handed, mut claimed, mut among) = (0, 0, 0, 0);
     for seed in 0..seeds {
-        let (fork, handover, claim) = run(seed);
+        let (fork, handover, claim, own) = run(seed);
         forked += fork as u32;
         handed += handover as u32;
         claimed += claim as u32;
+        among += own as u32;
     }
     // The runs have to reach what they are for.
     println!(
         "{forked} of {seeds} runs with a fork, {handed} with another owner at the end, \
-         {claimed} with a take-over that counts"
+         {claimed} with a take-over that counts, {among} with an admission or revocation \
+         among one user's devices that counts"
     );
+    assert!(among > seeds as u32 / 5, "the runs reach too few of those");
+    // Take-overs are rare: only a long run has to reach them.
     assert!(
-        claimed > seeds as u32 / 40,
+        seeds < 200 || claimed > seeds as u32 / 40,
         "the runs reach too few take-overs"
     );
     assert!(forked > seeds as u32 / 10 && handed > seeds as u32 / 20);
