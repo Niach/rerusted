@@ -11,17 +11,23 @@
 //! - [`keys`]: team keys, lockboxes, payload encryption.
 //! - [`Replica`]: the three together behind the `TeamLog` trait.
 //!
-//! One member is one device key, as in the p2panda spike. User keys with
-//! device certificates are not part of this.
+//! - [`user`]: the user's seed, its 24 words and the user key.
+//! - [`certificate`]: the user key's signature over a device's key.
+//!
+//! In the log one member is still one device key, as in the p2panda spike:
+//! user keys and certificates exist beside it and the rules do not read
+//! them yet.
 //!
 //! A device key must never be restored from a backup and used again: the
 //! restored device continues its log from an old position, which is a fork,
 //! and the device is out of every team for good.
 
+pub mod certificate;
 pub mod format;
 pub mod keys;
 mod replica;
 pub mod rules;
+pub mod user;
 
 use std::fmt;
 
@@ -56,6 +62,10 @@ pub enum Error {
     NotAnnounced(DeviceId),
     /// The device's sealing key cannot be used.
     Sealing(DeviceId),
+    /// The certificate's window has not begun.
+    NotYetValid,
+    /// The certificate's window is over.
+    Expired,
 }
 
 impl fmt::Display for Error {
@@ -74,6 +84,8 @@ impl fmt::Display for Error {
             Self::NotAllowed => write!(f, "not allowed by the team's rules"),
             Self::NotAnnounced(device) => write!(f, "{device:?} has not announced"),
             Self::Sealing(device) => write!(f, "cannot seal to {device:?}"),
+            Self::NotYetValid => write!(f, "the certificate is not valid yet"),
+            Self::Expired => write!(f, "the certificate has run out"),
         }
     }
 }

@@ -33,6 +33,19 @@ flowchart TD
 - The 24 words are recovery only (BIP39 over a 32-byte seed, as Brave Sync does). Unlike Brave, the phrase is not the everyday key: a new device is added by scanning a QR on an existing one.
 - One user has exactly one master session and one main chat, on every device.
 
+### The user key and device certificates
+
+Built in the crate `identity` (#RUST-17), modules `user` and `certificate`. Pure: no clock, no storage.
+
+- **Seed.** A user is 32 random bytes. Whoever holds them is the user.
+- **Words.** The seed is shown and typed back as 24 words: BIP39, English list, the seed as the entropy plus 8 checksum bits. A wrong or misplaced word is caught by the checksum. BIP39's second step, which stretches the words into a wallet seed, is not used.
+- **User key.** Ed25519; the secret is SHA-256("rerusted/user/1" ‖ seed). The user id is its public key. It signs device certificates and nothing else.
+- **Device certificate.** 145 bytes: `version (1) | user (32) | device (32) | not_before (u64) | not_after (u64) | signature (64)`, big-endian, times in seconds since 1970. The signature is the user key's over "rerusted/device-certificate/1" and the 81 bytes before it. It is valid when `not_before <= now < not_after`.
+- **Revocation** before the window ends is an operation in each team's log (decided 2026-11-14), written by another device of the same user or by anyone who outranks the device. Not built yet: the team log's rules still treat one device as one member.
+- **Owner.** One of a person's devices acts as owner at a time (decided 2026-11-14); moving the role to another of their devices is a handover.
+
+Test vectors: `crates/identity/tests/vectors/`.
+
 ## Teams
 
 - Trust model: team = secure. Join by invite link or QR only.
@@ -100,6 +113,8 @@ sequenceDiagram
 
 ## Open decisions
 
-1. p2panda crates (auth, encryption, spaces) behind our own trait, or our own signed log? p2panda is pre-1.0 and says its APIs may still break. Proposed: a spike with two devices and a phone (remove a member, rejoin offline) before deciding.
-2. Rented devices hold the team key and are trusted members; the end-to-end claim has to be worded accordingly.
-3. Recovery when every device is lost and the words too: none. Is that acceptable?
+1. Rented devices hold the team key and are trusted members; the end-to-end claim has to be worded accordingly.
+2. Where the user's seed lives day to day, so that an existing device can sign a new device's certificate (#RUST-17).
+3. How long a device certificate is valid and who renews it (#RUST-17).
+
+Decided since the draft: our own signed log, not p2panda (2026-11-14, #RUST-39). No recovery when every device and the words are lost; onboarding says so when it shows the words (2026-11-13).
