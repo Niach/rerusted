@@ -45,6 +45,10 @@ fn act(
     let other = nodes[j].id();
     let role = if random.below(3) == 0 { Admin } else { Member };
     let node = &mut nodes[i];
+    // Whoever is the heir of a forked owner tends to take the team over.
+    if random.below(3) == 0 {
+        let _ = node.log.take_over(team);
+    }
     match random.below(19) {
         0..3 => {
             let _ = now(node
@@ -97,7 +101,7 @@ fn act(
             ][random.below(3)]
             .unwrap_or(EntryId(team.0));
             let parents = resolved.parents().to_vec();
-            let kind = match random.below(5) {
+            let kind = match random.below(6) {
                 0 => node.removal(team, other, under),
                 1 => node.setting(team, other, role, under),
                 2 => Kind::Handover {
@@ -112,6 +116,12 @@ fn act(
                     under,
                     parents,
                 },
+                4 => Kind::Claim {
+                    team,
+                    under,
+                    parents,
+                    owner: other,
+                },
                 _ => Kind::Rotate {
                     team,
                     under,
@@ -123,6 +133,26 @@ fn act(
             node.forge(kind);
         }
     }
+}
+
+/// The device that is the owner in its own eyes writes, is put back to
+/// before that and writes something else: its log forks. Its neighbour
+/// holds the first branch.
+fn fork_owner(team: TeamId, nodes: &mut [Node]) {
+    let Some(i) = nodes.iter().position(|node| {
+        node.log
+            .team(team)
+            .is_some_and(|resolved| resolved.owner() == Some(node.id()))
+    }) else {
+        return;
+    };
+    let j = (i + 1) % nodes.len();
+    let backup = nodes[i].backup();
+    nodes[i].forge(Kind::Announce { sealing: [1; 32] });
+    let (left, right) = nodes.split_at_mut(i.max(j));
+    sync(&mut left[i.min(j)], &mut right[0]);
+    nodes[i].restore(&backup);
+    nodes[i].forge(Kind::Announce { sealing: [2; 32] });
 }
 
 /// The entries in another order: each device's log stays in order, the logs
@@ -145,7 +175,7 @@ fn shuffled(random: &mut Random, entries: Vec<Entry>) -> Vec<Entry> {
 }
 
 /// Returns whether a device forked and whether the team changed owner.
-fn run(seed: u64) -> (bool, bool) {
+fn run(seed: u64) -> (bool, bool, bool) {
     let mut random = Random(seed.wrapping_mul(0x9e37_79b9_7f4a_7c15) | 1);
     let mut nodes = NAMES.map(Node::new);
     {
@@ -159,6 +189,11 @@ fn run(seed: u64) -> (bool, bool) {
     now(first[0].log.add_member(team, rest[2].id(), Member)).unwrap();
     let mut backups = NAMES.map(|_| None);
     for step in 0..60 {
+        // In every third run the owner of the moment forks, early enough
+        // for an heir to take the team over and to act as owner.
+        if seed.is_multiple_of(3) && step == 5 + (seed as usize / 3) % 30 {
+            fork_owner(team, &mut nodes);
+        }
         act(&mut random, team, &mut nodes, &mut backups, step);
     }
     {
@@ -275,9 +310,19 @@ fn run(seed: u64) -> (bool, bool) {
             assert!(read.is_empty(), "{seed} {}", node.name);
         }
     }
+    // Whether an admin took the team over after an owner's fork.
+    let resolved = nodes[0].log.team(team).unwrap();
+    let claimed = nodes[0].log.entries().iter().any(|entry| {
+        resolved.counted(entry.id)
+            && matches!(
+                identity::format::read(&entry.bytes).map(|body| body.kind),
+                Ok(Kind::Claim { .. })
+            )
+    });
     (
         !forks.is_empty(),
         owner.is_some_and(|owner| owner != nodes[0].id()),
+        claimed,
     )
 }
 
@@ -285,13 +330,21 @@ fn run(seed: u64) -> (bool, bool) {
 fn replicas_agree_whatever_happened() {
     // More with `SEEDS=5000 cargo test --release -p identity --test converge`.
     let seeds = std::env::var("SEEDS").map_or(40, |seeds| seeds.parse().unwrap());
-    let (mut forked, mut handed) = (0, 0);
+    let (mut forked, mut handed, mut claimed) = (0, 0, 0);
     for seed in 0..seeds {
-        let (fork, handover) = run(seed);
+        let (fork, handover, claim) = run(seed);
         forked += fork as u32;
         handed += handover as u32;
+        claimed += claim as u32;
     }
     // The runs have to reach what they are for.
-    println!("{forked} of {seeds} runs with a fork, {handed} with another owner at the end");
+    println!(
+        "{forked} of {seeds} runs with a fork, {handed} with another owner at the end, \
+         {claimed} with a take-over that counts"
+    );
+    assert!(
+        claimed > seeds as u32 / 40,
+        "the runs reach too few take-overs"
+    );
     assert!(forked > seeds as u32 / 10 && handed > seeds as u32 / 20);
 }

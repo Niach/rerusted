@@ -21,6 +21,7 @@
 //! 6 handover = team under parents member cut
 //! 7 leave    = team under parents
 //! 8 accept   = team under parents u32 length, entry       the handover, whole
+//! 9 claim    = team under parents owner                     owner: 32 bytes, the forked owner
 //!
 //! team, under, member, key = 32 bytes each
 //! parents    = u16 count, then (device, seq, id) of 32, 8 and 32 bytes,
@@ -126,6 +127,13 @@ pub enum Kind {
         parents: Vec<Parent>,
         /// The handover entry with its signature.
         handover: Vec<u8>,
+    },
+    Claim {
+        team: TeamId,
+        under: EntryId,
+        parents: Vec<Parent>,
+        /// The owner whose fork left the team without one.
+        owner: DeviceId,
     },
 }
 
@@ -287,6 +295,18 @@ impl Body {
                 out.extend_from_slice(&(handover.len() as u32).to_be_bytes());
                 out.extend_from_slice(handover);
             }
+            Kind::Claim {
+                team,
+                under,
+                parents,
+                owner,
+            } => {
+                out.push(9);
+                out.extend_from_slice(&team.0);
+                out.extend_from_slice(&under.0);
+                put_parents(&mut out, parents);
+                out.extend_from_slice(&owner.0);
+            }
         }
         out
     }
@@ -442,6 +462,12 @@ fn decode_body(bytes: &[u8]) -> Result<Body, Error> {
                 let len = u32::from_be_bytes(r.array()?) as usize;
                 r.take(len)?.to_vec()
             },
+        },
+        9 => Kind::Claim {
+            team: TeamId(r.array()?),
+            under: EntryId(r.array()?),
+            parents: r.parents()?,
+            owner: DeviceId(r.array()?),
         },
         _ => return Err(Error::Malformed("kind")),
     };

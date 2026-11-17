@@ -134,3 +134,49 @@ const ENTRY: &str = "\
     4e18b9ba11d31d93f706c6fbdba10c3d48a3ce65576048954437ad19d762bc59\
     15ca1af168d7b948cfeccc8e172c6c0768fcc0f681b0a47e67df21e85103b60f";
 const ID: &str = "26957736c4f3aa02c5edb76f75f87854945e2543aac1716bd115606ed4f50881";
+
+/// Test vector for kind 9, the claim: the second entry of the same device.
+/// The fields are fixed bytes, not a real team. Computed outside this crate
+/// (Python: hashlib, cryptography).
+#[test]
+fn claim_vector() {
+    let seed: [u8; 32] = std::array::from_fn(|i| i as u8);
+    let mut replica = Replica::from_seed(seed);
+    let announce = now(replica.announce()).unwrap().remove(0);
+    let body = Body {
+        author: announce.author,
+        seq: 1,
+        prev: announce.id,
+        kind: Kind::Claim {
+            team: teamlog::TeamId([1; 32]),
+            under: EntryId([2; 32]),
+            parents: vec![identity::rules::Parent {
+                device: DeviceId([3; 32]),
+                seq: 4,
+                id: EntryId([5; 32]),
+            }],
+            owner: DeviceId([6; 32]),
+        },
+    };
+    let bytes = format::seal(&body, &keys::signing_key(&seed));
+    assert_eq!(hex(&bytes), CLAIM);
+    assert_eq!(hex(&format::id(&bytes).0), CLAIM_ID);
+    assert_eq!(format::open(&bytes), Ok(body));
+}
+
+const CLAIM: &str = "\
+    01\
+    01c08ad63554bafdca11353a3f4552cce15b05e033361589594423cb7d9295ad\
+    0000000000000001\
+    26957736c4f3aa02c5edb76f75f87854945e2543aac1716bd115606ed4f50881\
+    09\
+    0101010101010101010101010101010101010101010101010101010101010101\
+    0202020202020202020202020202020202020202020202020202020202020202\
+    0001\
+    0303030303030303030303030303030303030303030303030303030303030303\
+    0000000000000004\
+    0505050505050505050505050505050505050505050505050505050505050505\
+    0606060606060606060606060606060606060606060606060606060606060606\
+    88eedc66e930aa2a5f331ded72fc66aea2b5649bc24e58db2d1ddbbf6577cbb6\
+    8c721e236512c792c223f25591608e876ebb27f0bebaaf057992b49eb9a5ca04";
+const CLAIM_ID: &str = "c3b9e04fceeef5fc269bcb758baf643e1d8187155bebb339f56033e548df4b3f";
