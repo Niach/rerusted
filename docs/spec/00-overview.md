@@ -78,6 +78,14 @@ flowchart TB
 | Code and CI (phase 3) | #RUST-9 | [05-code-ci.md](05-code-ci.md) |
 | Dev and test rig | #RUST-21 | [08-dev-rig.md](08-dev-rig.md) |
 
+## Lessons
+
+Not specs: what was learned elsewhere, as numbered rules a design is checked against.
+
+| Lessons | Issue | File |
+|---|---|---|
+| Computer use and Voice in eDE (Exponential Desktop): each mistake, why it happened, the rule (L-01 to L-61) | #EDE-118, #EDE-69 | [../lessons/ede-computer-use-and-voice.md](../lessons/ede-computer-use-and-voice.md) |
+
 ## Phases
 
 | Phase | Issue | Done when |
