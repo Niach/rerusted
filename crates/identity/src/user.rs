@@ -1,7 +1,8 @@
 //! The user key and its 24 words (#RUST-17).
 //!
 //! A user is one 32-byte seed. The seed is shown and restored as 24 words,
-//! and the key the user signs device certificates with is derived from it:
+//! and the user key, which signs the first device's certificate, is derived
+//! from it:
 //!
 //! ```text
 //! words      = BIP39, English list: the 256 bits of the seed, then the first
@@ -166,8 +167,10 @@ impl Seed {
     }
 }
 
-/// A user's signing key. It signs device certificates and nothing else: no
-/// log entry is signed with it.
+/// A user's signing key. It signs the certificate of the user's first
+/// device, and of a device set up from the 24 words, and nothing else: no
+/// log entry is signed with it. It is made from the seed when it is needed
+/// and kept nowhere.
 pub struct UserKey(pub(crate) SigningKey);
 
 impl UserKey {

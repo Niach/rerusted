@@ -12,7 +12,8 @@
 //! - [`Replica`]: the three together behind the `TeamLog` trait.
 //!
 //! - [`user`]: the user's seed, its 24 words and the user key.
-//! - [`certificate`]: the user key's signature over a device's key.
+//! - [`certificate`]: the signatures that lead from the user key to a
+//!   device.
 //!
 //! In the log one member is still one device key, as in the p2panda spike:
 //! user keys and certificates exist beside it and the rules do not read
@@ -62,10 +63,6 @@ pub enum Error {
     NotAnnounced(DeviceId),
     /// The device's sealing key cannot be used.
     Sealing(DeviceId),
-    /// The certificate's window has not begun.
-    NotYetValid,
-    /// The certificate's window is over.
-    Expired,
 }
 
 impl fmt::Display for Error {
@@ -84,8 +81,6 @@ impl fmt::Display for Error {
             Self::NotAllowed => write!(f, "not allowed by the team's rules"),
             Self::NotAnnounced(device) => write!(f, "{device:?} has not announced"),
             Self::Sealing(device) => write!(f, "cannot seal to {device:?}"),
-            Self::NotYetValid => write!(f, "the certificate is not valid yet"),
-            Self::Expired => write!(f, "the certificate has run out"),
         }
     }
 }
