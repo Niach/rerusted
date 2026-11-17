@@ -922,8 +922,8 @@ impl Replica {
         Ok(entries)
     }
 
-    /// Takes over a team whose owner forked. Only the admin that has been
-    /// one for the longest may: [`Team::heir`] names it.
+    /// Takes over a team that is left without an owner. Only the heir
+    /// may: [`Team::heir`] names it.
     pub fn take_over(&mut self, team: TeamId) -> Result<Vec<Entry>, Error> {
         self.ready()?;
         let resolved = self.resolved(team)?;
@@ -933,9 +933,15 @@ impl Replica {
         if heir != self.device {
             return Err(Error::NotAllowed);
         }
+        // Written as what this device is: an admin, or a member that is
+        // another device of the former owner's user.
+        let under = resolved
+            .admin_grant(self.device)
+            .or(resolved.member_grant(self.device))
+            .ok_or(Error::NotAllowed)?;
         let kind = Kind::Claim {
             team,
-            under: self.admin_grant(team)?,
+            under,
             parents: resolved.parents().to_vec(),
             owner,
         };
