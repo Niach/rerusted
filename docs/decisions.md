@@ -110,6 +110,9 @@ Every decision taken and every open question, each with its date and source issu
 | 2026-11-17 | Only the inviter's device writes the admission for its invite, and the invite has to stand earlier in the same log. One log has one order, so "works once" needs no rule for two admins using one invite at the same time. Cost: the inviter's device has to be reachable; that is why the invite names it. | #RUST-44 |
 | 2026-11-17 | The expiry is checked once, by the inviter's device, against the time its caller passes. The log's rules stay free of time. An admission with an invite that does not hold (unknown, used, for another device) is an entry that changes nothing. | #RUST-44 |
 | 2026-11-17 | An invite lets a device in as a member. Other roles are given afterwards by whoever may. The text form of an invite (link, QR) is the caller's. | #RUST-44 |
+| 2026-11-17 | Confirmed by Danny: two devices of one user that revoke each other unseen are both out, with the known weakness that a revoked device pretending not to have heard takes the revoker out with it. | #RUST-45, #RUST-42 |
+| 2026-11-17 | A team left without an owner by such a mutual revocation may be taken over by the heir, as after an owner's fork. Answered by Danny on the third plan card. | #RUST-45 |
+| 2026-11-17 | The heir is first another device of the former owner's user that is in the team, whatever its rank, the highest role first; only then the longest-standing admin. Answered on the same card. Such a device counts when an owner's operation or one of the user's own devices let it in; one that only an admin admitted does not, because the heir has to be known before the admins' operations are judged. | #RUST-45 |
 | 2026-11-17 | The team log is our own signed log in `identity`; p2panda is not used. #RUST-17 goes ahead as written, on the design of the #RUST-39 spike. | #RUST-3, #RUST-17 |
 
 ## Open questions
@@ -121,8 +124,6 @@ Every decision taken and every open question, each with its date and source issu
 | 2026-11-10/11 | Label granularity: per provider (`twitter`) or per account and kind? | #RUST-2 |
 | 2026-11-10/11 | Is `allow` per wire enough, or does it need an expiry? | #RUST-2 |
 | 2026-11-10/11 | Dynamic children (one subtree per list item): template in the `view` primitive only, or a `for-each` in compose? | #RUST-2 |
-| 2026-11-17 | After two devices of one user revoked each other unseen and one was the owner, the team has no owner and nobody can take it over: the heir rule applies after a fork only. Should the longest-standing admin be the heir here too? | #RUST-42, #RUST-43 |
-| 2026-11-17 | The owner's device forks and the same person has another device in the team. Today the longest-standing admin is the heir, who may be somebody else. Should the person's own device come first? | #RUST-42, #RUST-43 |
 | 2026-11-10/11 | Rented devices hold the team key and are trusted members; the end-to-end claim has to be worded accordingly. | #RUST-3 |
 | 2026-11-10/11 | Recovery when every device is lost and the words too: none. Is that acceptable? | #RUST-3 |
 | 2026-11-10/11 | Is `process` one primitive, or `process` + a separate `window` view primitive? | #RUST-4 |

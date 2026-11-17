@@ -56,9 +56,11 @@
 //! it wrote before stays. A reference to one of its void operations reads
 //! as a reference to its last one that counts.
 //!
-//! When the owner forks and no handover of its was accepted, the admin that
-//! has been one for the longest may take the team over with a claim; see
-//! [`Action::Claim`]. Until it does, and when there is no admin,
+//! When the owner forks and no handover of its was accepted, or when it and
+//! the device that revoked it are both out, the heir may take the team over
+//! with a claim; see [`Action::Claim`]. The heir is first another device of
+//! the same user that is in the team, then the admin that has been one for
+//! the longest. Until it claims, and when there is no heir,
 //! the team has no owner from there on. Members and
 //! admins go on; nobody makes or removes an admin.
 //!
@@ -155,9 +157,11 @@ pub enum Action {
     Accept {
         handover: Handed,
     },
-    /// Takes the ownership of a team whose owner `owner` forked and left
-    /// no accepted handover. It counts when the author is the heir: of the
-    /// admins the owners made, the one that has been admin for the longest.
+    /// Takes the ownership of a team that `owner` left without one: it
+    /// forked and left no accepted handover, or it was revoked by a device
+    /// that is out as well. It counts when the author is the heir: another
+    /// device of `owner`'s user that is in the team, else, of the admins
+    /// the owners made, the one that has been admin for the longest.
     Claim {
         owner: DeviceId,
     },
@@ -589,7 +593,7 @@ pub fn resolve(
     let mut applied = own.clone();
     let mut rounds: Vec<BTreeSet<EntryId>> = Vec::new();
     loop {
-        let resolved = resolve_round(team, ops, forks, &own, &applied)?;
+        let resolved = resolve_round(team, ops, forks, users, &own, &applied)?;
         if own.is_empty() {
             return Some(resolved);
         }
@@ -604,7 +608,7 @@ pub fn resolve(
         rounds.push(applied);
         if let Some(at) = rounds.iter().position(|round| *round == backed) {
             let circle: BTreeSet<EntryId> = rounds[at..].iter().flatten().copied().collect();
-            return resolve_round(team, ops, forks, &own, &circle);
+            return resolve_round(team, ops, forks, users, &own, &circle);
         }
         applied = backed;
     }
@@ -616,6 +620,7 @@ fn resolve_round(
     team: TeamId,
     ops: &[Op],
     forks: &BTreeMap<DeviceId, u64>,
+    users: &BTreeMap<DeviceId, UserId>,
     own: &BTreeSet<EntryId>,
     applied: &BTreeSet<EntryId>,
 ) -> Option<Team> {
@@ -744,8 +749,8 @@ fn resolve_round(
         }
         effects
     };
-    // Who is admin or owner by those effects, and from where.
-    let admin_lines_of = |effects: &BTreeMap<usize, Effects>| {
+    // Who stands in `floor` or higher by those effects, and from where.
+    let lines_of = |effects: &BTreeMap<usize, Effects>, floor: Role| {
         let mut lines: BTreeMap<DeviceId, Vec<Step>> = BTreeMap::new();
         for (i, effect) in effects {
             for (device, cut, role) in effect {
@@ -753,7 +758,7 @@ fn resolve_round(
                     lines.entry(*device).or_default(),
                     Some(order[*i].id),
                     *cut,
-                    role.filter(|role| *role >= Role::Admin),
+                    role.filter(|role| *role >= floor),
                 );
             }
         }
@@ -804,6 +809,8 @@ fn resolve_round(
             })
             .min_by_key(|(cut, i, _)| (*cut, *i))
             .filter(|(cut, ..)| in_log.is_none_or(|(.., until)| *cut < until));
+        // Whether the reign ended and left the team without an owner.
+        let mut vacant = false;
         if let Some((cut, at, op)) = revocation
             && reigns.len() <= order.len()
         {
@@ -821,8 +828,9 @@ fn resolve_round(
             if !cut_off {
                 takes.insert(at);
                 next = Some((op.author, Some(at), Some((at, op.id))));
+                continue;
             }
-            continue;
+            vacant = true;
         }
         let accepted = || {
             let named: BTreeSet<EntryId> = order
@@ -843,29 +851,40 @@ fn resolve_round(
             let only = named.first().filter(|_| named.len() == 1)?;
             Some((None, *only, fork(&device)))
         };
-        let Some((handover, id, until)) = in_log.or_else(accepted) else {
-            let until = fork(&device);
-            reigns.push(Reign {
-                device,
-                since,
-                grant,
-                until,
-            });
-            if until == u64::MAX {
-                break;
+        let ended = if vacant {
+            None
+        } else {
+            in_log.or_else(accepted)
+        };
+        let Some((handover, id, until)) = ended else {
+            if !vacant {
+                let until = fork(&device);
+                reigns.push(Reign {
+                    device,
+                    since,
+                    grant,
+                    until,
+                });
+                if until == u64::MAX {
+                    break;
+                }
             }
-            // The owner forked and handed the team to nobody. Of the admins
-            // the owners made, the one that has been admin for the longest
-            // without a break may take over: the stay that began first in
-            // the order of the operations, the lower device on a tie. It
-            // takes over with the first claim in its log that names this
-            // owner and is written as the admin it is. An admin that forked
-            // itself is passed over, unless it had claimed before: what a
-            // device wrote before its fork stays.
-            let lines = admin_lines_of(&owner_effects(
-                &reigns, &handovers, &accepts, &claims, &takes,
-            ));
-            let claim_of = |successor: &DeviceId| {
+            // The team has no owner: the owner forked and handed it to
+            // nobody, or it and the device that revoked it are both out.
+            // The heir may take over. That is first another device of the
+            // same user that the owners' operations leave in the team, the
+            // one of the highest role; then, of the admins the owners made,
+            // the one that has been admin for the longest without a break.
+            // Among equals the stay that began first in the order of the
+            // operations counts, then the lower device. The heir takes over
+            // with the first claim in its log that names this owner and is
+            // written as what it is. A device that forked itself is passed
+            // over, unless it had claimed before: what a device wrote
+            // before its fork stays.
+            let effects = owner_effects(&reigns, &handovers, &accepts, &claims, &takes);
+            let admins = lines_of(&effects, Role::Admin);
+            let everyone = lines_of(&effects, Role::Member);
+            let claim_of = |successor: &DeviceId, lines: &BTreeMap<DeviceId, Vec<Step>>| {
                 order
                     .iter()
                     .enumerate()
@@ -878,32 +897,51 @@ fn resolve_round(
                     })
                     .min_by_key(|(_, op)| op.seq)
             };
-            let since = |candidate: &DeviceId, line: &[Step]| {
+            // The role a candidate stands in and where that stay began.
+            let standing = |candidate: &DeviceId, lines: &BTreeMap<DeviceId, Vec<Step>>| {
                 if *candidate == device {
                     return None;
                 }
+                let line = &lines[candidate][..];
                 let line = match line.split_last() {
                     Some((end, before)) if end.op.is_none() => {
-                        claim_of(candidate)?;
+                        claim_of(candidate, lines)?;
                         before
                     }
                     _ => line,
                 };
-                let last = line.last().filter(|step| step.role.is_some())?;
+                let last = line.last()?;
+                let role = last.role?;
                 let first = line
                     .iter()
                     .find(|step| step.stay == last.stay && step.role.is_some())?;
-                order.iter().position(|op| Some(op.id) == first.op)
+                let began = order.iter().position(|op| Some(op.id) == first.op)?;
+                Some((role, began))
             };
-            let Some((_, successor)) = lines
-                .iter()
-                .filter_map(|(candidate, line)| Some((since(candidate, line)?, *candidate)))
+            let own = everyone
+                .keys()
+                .filter(|candidate| {
+                    users
+                        .get(*candidate)
+                        .is_some_and(|user| users.get(&device) == Some(user))
+                })
+                .filter_map(|candidate| {
+                    let (role, began) = standing(candidate, &everyone)?;
+                    Some((std::cmp::Reverse(role), began, *candidate))
+                })
                 .min()
-            else {
+                .map(|(.., candidate)| (candidate, &everyone));
+            let longest = || {
+                admins
+                    .keys()
+                    .filter_map(|candidate| Some((standing(candidate, &admins)?.1, *candidate)))
+                    .min()
+                    .map(|(_, candidate)| (candidate, &admins))
+            };
+            let Some((successor, lines)) = own.or_else(longest) else {
                 break;
             };
-            let claim = claim_of(&successor);
-            let Some((at, op)) = claim else {
+            let Some((at, op)) = claim_of(&successor, lines) else {
                 heir = Some((device, successor));
                 break;
             };
@@ -950,7 +988,7 @@ fn resolve_round(
         .map(|reign| (reign.device, reign.grant.map(|(_, id)| id)));
     // 2. The owners' operations.
     let mut effects = owner_effects(&reigns, &handovers, &accepts, &claims, &takes);
-    let admin_lines = admin_lines_of(&effects);
+    let admin_lines = lines_of(&effects, Role::Admin);
     let mut on: BTreeMap<DeviceId, Vec<(usize, Option<Role>)>> = BTreeMap::new();
     for (i, effect) in &effects {
         for (device, _, role) in effect {

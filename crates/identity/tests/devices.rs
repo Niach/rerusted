@@ -293,6 +293,130 @@ fn two_devices_that_revoke_each_other_at_once_are_both_out() {
     all(&mut nodes);
     assert_eq!(roles(team, &nodes), [("b", Admin), ("c", Member)]);
     assert_eq!(owner(team, &nodes), None);
+
+    // The longest-standing admin may take it over, as after a fork.
+    let (lost, heir) = (nodes[0].id(), nodes[3].id());
+    for node in &nodes {
+        assert_eq!(
+            node.log.team(team).unwrap().heir(),
+            Some((lost, heir)),
+            "{}",
+            node.name
+        );
+    }
+    assert_eq!(nodes[7].log.take_over(team), Err(Error::NotAllowed));
+    nodes[3].log.take_over(team).unwrap();
+    all(&mut nodes);
+    assert_eq!(roles(team, &nodes), [("b", Owner), ("c", Member)]);
+    let [_, _, _, b, _, _, _, c] = &mut nodes;
+    now(b.log.set_role(team, c.id(), Admin)).unwrap();
+}
+
+/// Puts `node` back to a backup taken now and lets it write on both sides
+/// of it, so that its log forks. `witness` holds one branch.
+fn fork(team: TeamId, node: &mut Node, witness: &mut Node) {
+    let backup = node.backup();
+    node.write(team, "x");
+    sync(node, witness);
+    node.restore(&backup);
+    node.forge(Kind::Announce { sealing: [7; 32] });
+}
+
+/// The owner's device forks. Its user's other device in the team is the
+/// heir, although it is a member and b an admin of long standing.
+#[test]
+fn after_an_owners_fork_its_users_own_device_comes_first() {
+    let (team, mut nodes) = team();
+    {
+        let [a, a2, a3, b, b2, r, r2, c] = &mut nodes;
+        a.log.admit(team, a2.id(), Member).unwrap();
+        settle(&mut [a, a2, a3, b, b2, r, r2, c]);
+        fork(team, a, b);
+    }
+    all(&mut nodes);
+    let (lost, heir) = (nodes[0].id(), nodes[1].id());
+    for node in &nodes {
+        assert_eq!(
+            node.log.team(team).unwrap().heir(),
+            Some((lost, heir)),
+            "{}",
+            node.name
+        );
+    }
+    assert_eq!(nodes[3].log.take_over(team), Err(Error::NotAllowed));
+    nodes[1].log.take_over(team).unwrap();
+    all(&mut nodes);
+    assert_eq!(
+        roles(team, &nodes),
+        [("a2", Owner), ("b", Admin), ("c", Member), ("r", Member)]
+    );
+    // It is the owner in full.
+    let [_, a2, _, b, ..] = &mut nodes;
+    now(a2.log.remove_member(team, b.id())).unwrap();
+    all(&mut nodes);
+    assert_eq!(
+        roles(team, &nodes),
+        [("a2", Owner), ("c", Member), ("r", Member)]
+    );
+}
+
+/// Of several own devices the one of the highest role is the heir; a
+/// device of the user's that is not in the team is none.
+#[test]
+fn of_the_users_devices_the_highest_role_is_the_heir() {
+    let (team, mut nodes) = team();
+    {
+        let [a, a2, a3, b, b2, r, r2, c] = &mut nodes;
+        a.log.admit(team, a2.id(), Member).unwrap();
+        a.log.admit(team, a3.id(), Admin).unwrap();
+        settle(&mut [a, a2, a3, b, b2, r, r2, c]);
+        fork(team, a, b);
+    }
+    all(&mut nodes);
+    assert_eq!(
+        nodes[7].log.team(team).unwrap().heir(),
+        Some((nodes[0].id(), nodes[2].id()))
+    );
+    // When that one leaves, the next of the user's; then the admin.
+    now(nodes[2].log.leave(team)).unwrap();
+    all(&mut nodes);
+    assert_eq!(
+        nodes[7].log.team(team).unwrap().heir(),
+        Some((nodes[0].id(), nodes[1].id()))
+    );
+    now(nodes[1].log.leave(team)).unwrap();
+    all(&mut nodes);
+    assert_eq!(
+        nodes[7].log.team(team).unwrap().heir(),
+        Some((nodes[0].id(), nodes[3].id()))
+    );
+}
+
+/// A claim by the admin does not count while the owner's own device is
+/// the heir.
+#[test]
+fn an_admins_claim_does_not_count_before_the_users_own_device() {
+    let (team, mut nodes) = team();
+    {
+        let [a, a2, a3, b, b2, r, r2, c] = &mut nodes;
+        a.log.admit(team, a2.id(), Member).unwrap();
+        settle(&mut [a, a2, a3, b, b2, r, r2, c]);
+        fork(team, a, b);
+        settle(&mut [a, a2, a3, b, b2, r, r2, c]);
+        let resolved = b.log.team(team).unwrap();
+        let claim = Kind::Claim {
+            team,
+            under: resolved.admin_grant(b.id()).unwrap(),
+            parents: resolved.parents().to_vec(),
+            owner: a.id(),
+        };
+        b.forge(claim);
+    }
+    all(&mut nodes);
+    assert_eq!(owner(team, &nodes), None);
+    nodes[1].log.take_over(team).unwrap();
+    all(&mut nodes);
+    assert_eq!(owner(team, &nodes), Some(nodes[1].id()));
 }
 
 #[test]
