@@ -62,6 +62,25 @@
 //! the team has no owner from there on. Members and
 //! admins go on; nobody makes or removes an admin.
 //!
+//! # One user's devices
+//!
+//! A device says which user it belongs to with a certificate chain. What
+//! two devices of one user do to each other needs no rank:
+//!
+//! - A device that is in the team admits another, in a role no higher than
+//!   its own and never as owner ([`Action::Admit`]).
+//! - A device that is in the team takes another out ([`Action::Revoke`]).
+//!   Like a leave, that beats every admission, promotion and handover of
+//!   the device that it had not seen. When the device is the owner, the
+//!   revoker is the owner from its revocation on.
+//!
+//! Both count like an owner's operations: an admin's operation on the same
+//! device that had not seen them is void. An admission gives way to the
+//! owner's own word on the device that it had not seen. Whether the author
+//! is in the team where the operation stands depends on the other such
+//! operations; [`resolve`] says how that is settled, and that two devices
+//! which revoke each other unseen are both out.
+//!
 //! # Concurrent operations
 //!
 //! - The owner's operations always count, unless a leave beats them.
@@ -85,6 +104,8 @@
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 use teamlog::{DeviceId, EntryId, Role, TeamId};
+
+use crate::user::UserId;
 
 /// The hash of a team key.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -139,6 +160,24 @@ pub enum Action {
     /// admins the owners made, the one that has been admin for the longest.
     Claim {
         owner: DeviceId,
+    },
+    /// Admits `member`, a device of the author's own user, in a role no
+    /// higher than the author's and never as owner. It counts like an
+    /// owner's operation, but an owner's own word on `member` that had not
+    /// seen it beats it.
+    Admit {
+        member: DeviceId,
+        role: Role,
+        cut: u64,
+    },
+    /// Takes `member`, a device of the author's own user, out, whatever the
+    /// two devices' roles. Like a leave it beats every admission, promotion
+    /// and handover of `member` that it had not seen. When `member` is the
+    /// owner, the author is the owner from here on. A [`Action::Remove`]
+    /// between two devices of one user is read as this.
+    Revoke {
+        member: DeviceId,
+        cut: u64,
     },
     /// Takes the author out.
     Leave,
@@ -324,6 +363,27 @@ impl Team {
         &self.parents
     }
 
+    /// Whether `op`, an admission or a revocation among one user's devices,
+    /// is backed by its author's standing where it stands in the log: the
+    /// author is in the team there, and for an admission in a role no lower
+    /// than the one it hands out.
+    fn backs(&self, op: &Op) -> bool {
+        let Some(line) = self.lines.get(&op.author) else {
+            return false;
+        };
+        if !covers(line, op.seq, op.under) {
+            return false;
+        }
+        match op.action {
+            Action::Admit { role, .. } => {
+                let mine = in_force(line, op.seq).and_then(|step| step.role);
+                role != Role::Owner && mine.is_some_and(|mine| mine >= role)
+            }
+            Action::Revoke { .. } | Action::Remove { .. } => true,
+            _ => false,
+        }
+    }
+
     /// Whether the operation took effect: it changed standings or keys.
     pub fn counted(&self, op: EntryId) -> bool {
         self.counted.contains(&op)
@@ -481,10 +541,81 @@ struct Reign {
 /// What an operation does to devices' standings: (device, cut, role).
 type Effects = Vec<(DeviceId, u64, Option<Role>)>;
 
-/// Resolves the team `team` from whatever operations of it are held and the
-/// forks known: for a forked device, the lowest position it signed twice.
-/// `None` while the team's first operation is not among the operations.
-pub fn resolve(team: TeamId, ops: &[Op], forks: &BTreeMap<DeviceId, u64>) -> Option<Team> {
+/// The device a revocation takes out and its cut: an [`Action::Revoke`], or
+/// an [`Action::Remove`] that is read as one.
+fn revoked(op: &Op) -> Option<(DeviceId, u64)> {
+    match op.action {
+        Action::Revoke { member, cut } | Action::Remove { member, cut } => Some((member, cut)),
+        _ => None,
+    }
+}
+
+/// Resolves the team `team` from whatever operations of it are held, the
+/// forks known (for a forked device, the lowest position it signed twice)
+/// and the users known (for a device, the user its certificate chain leads
+/// to). `None` while the team's first operation is not among the operations.
+///
+/// What devices of one user do to each other, admissions and revocations,
+/// counts when its author is in the team where the operation stands. That
+/// depends on the other such operations, so it is found by going round: all
+/// of them are taken to count, the team is resolved, those the result does
+/// not back are dropped, and again, until nothing changes. Where it goes in
+/// a circle, as with two devices that revoke each other without having
+/// seen it, all operations of the circle count: both devices are out.
+pub fn resolve(
+    team: TeamId,
+    ops: &[Op],
+    forks: &BTreeMap<DeviceId, u64>,
+    users: &BTreeMap<DeviceId, UserId>,
+) -> Option<Team> {
+    let siblings = |a: &DeviceId, b: &DeviceId| {
+        a != b && users.get(a).is_some_and(|user| users.get(b) == Some(user))
+    };
+    let own: BTreeSet<EntryId> = ops
+        .iter()
+        .filter(|op| match op.action {
+            Action::Admit { member, .. }
+            | Action::Revoke { member, .. }
+            | Action::Remove { member, .. } => siblings(&op.author, &member),
+            _ => false,
+        })
+        .map(|op| op.id)
+        .collect();
+    // An admission or revocation between devices that are not one user's
+    // is nothing, and stays out of every round.
+    let mut applied = own.clone();
+    let mut rounds: Vec<BTreeSet<EntryId>> = Vec::new();
+    loop {
+        let resolved = resolve_round(team, ops, forks, &own, &applied)?;
+        if own.is_empty() {
+            return Some(resolved);
+        }
+        let backed: BTreeSet<EntryId> = ops
+            .iter()
+            .filter(|op| own.contains(&op.id) && resolved.backs(op))
+            .map(|op| op.id)
+            .collect();
+        if backed == applied {
+            return Some(resolved);
+        }
+        rounds.push(applied);
+        if let Some(at) = rounds.iter().position(|round| *round == backed) {
+            let circle: BTreeSet<EntryId> = rounds[at..].iter().flatten().copied().collect();
+            return resolve_round(team, ops, forks, &own, &circle);
+        }
+        applied = backed;
+    }
+}
+
+/// One round of [`resolve`]: of the operations among one user's devices,
+/// `own`, exactly those in `applied` count.
+fn resolve_round(
+    team: TeamId,
+    ops: &[Op],
+    forks: &BTreeMap<DeviceId, u64>,
+    own: &BTreeSet<EntryId>,
+    applied: &BTreeSet<EntryId>,
+) -> Option<Team> {
     let fork = |device: &DeviceId| forks.get(device).copied().unwrap_or(u64::MAX);
     let live: Vec<&Op> = ops.iter().filter(|op| op.seq < fork(&op.author)).collect();
     let (order, deps) = placed(team, &live, forks);
@@ -497,6 +628,12 @@ pub fn resolve(team: TeamId, ops: &[Op], forks: &BTreeMap<DeviceId, u64>) -> Opt
     for (i, op) in order.iter().enumerate() {
         if op.action == Action::Leave {
             leaves.entry(op.author).or_default().push(i);
+        }
+        // A revocation is a leave that a device of the same user wrote.
+        if applied.contains(&op.id)
+            && let Some((member, _)) = revoked(op)
+        {
+            leaves.entry(member).or_default().push(i);
         }
     }
     let left = |i: usize, member: &DeviceId| {
@@ -529,10 +666,41 @@ pub fn resolve(team: TeamId, ops: &[Op], forks: &BTreeMap<DeviceId, u64>) -> Opt
     let owner_effects = |reigns: &[Reign],
                          handovers: &BTreeSet<usize>,
                          accepts: &BTreeSet<usize>,
-                         claims: &BTreeSet<usize>| {
+                         claims: &BTreeSet<usize>,
+                         takes: &BTreeSet<usize>| {
         let mut effects: BTreeMap<usize, Effects> = BTreeMap::new();
         effects.insert(0, vec![(create.author, 0, Some(Role::Owner))]);
         for (i, op) in order.iter().enumerate() {
+            // What devices of one user do to each other.
+            if own.contains(&op.id) {
+                if !applied.contains(&op.id) {
+                    continue;
+                }
+                if let Action::Admit { member, role, cut } = op.action {
+                    // Not an owner, and not against the owner's own word.
+                    let owned = reigns
+                        .iter()
+                        .any(|reign| reign.device == member && cut < reign.until);
+                    let overruled = order.iter().enumerate().any(|(j, other)| {
+                        !own.contains(&other.id)
+                            && matches!(other.action,
+                                Action::Set { member: on, .. } | Action::Remove { member: on, .. }
+                                    if on == member)
+                            && by_owner(reigns, j, other)
+                            && !ancestry.comparable(j, i)
+                    });
+                    if role != Role::Owner && !owned && !overruled && !left(i, &member) {
+                        effects.insert(i, vec![(member, cut, Some(role))]);
+                    }
+                } else if let Some((member, cut)) = revoked(op) {
+                    let mut effect = vec![(member, cut, None)];
+                    if takes.contains(&i) {
+                        effect.push((op.author, op.seq, Some(Role::Owner)));
+                    }
+                    effects.insert(i, effect);
+                }
+                continue;
+            }
             let effect = match op.action {
                 Action::Set { member, role, cut }
                     if by_owner(reigns, i, op)
@@ -551,10 +719,16 @@ pub fn resolve(team: TeamId, ops: &[Op], forks: &BTreeMap<DeviceId, u64>) -> Opt
                     (member, cut, Some(Role::Owner)),
                     (op.author, op.seq + 1, Some(Role::Admin)),
                 ],
-                Action::Accept { .. } if accepts.contains(&i) => {
-                    vec![(op.author, op.seq, Some(Role::Owner))]
-                }
-                Action::Claim { .. } if claims.contains(&i) => {
+                // An acceptance or a claim at or after the end of the reign
+                // it opens gives nothing: a revocation cut it off.
+                Action::Accept { .. } | Action::Claim { .. }
+                    if (accepts.contains(&i) || claims.contains(&i))
+                        && reigns.iter().any(|reign| {
+                            reign.device == op.author
+                                && reign.grant.is_some_and(|(g, _)| g == i)
+                                && op.seq < reign.until
+                        }) =>
+                {
                     vec![(op.author, op.seq, Some(Role::Owner))]
                 }
                 // The owner cannot leave.
@@ -593,6 +767,7 @@ pub fn resolve(team: TeamId, ops: &[Op], forks: &BTreeMap<DeviceId, u64>) -> Opt
     let mut handovers = BTreeSet::new();
     let mut accepts = BTreeSet::new();
     let mut claims = BTreeSet::new();
+    let mut takes = BTreeSet::new();
     let mut handed = None;
     let mut heir = None;
     let mut next = Some((create.author, Some(0), Some((0, create.id))));
@@ -611,6 +786,41 @@ pub fn resolve(team: TeamId, ops: &[Op], forks: &BTreeMap<DeviceId, u64>) -> Opt
             })
             .min_by_key(|(_, op)| op.seq)
             .map(|(i, op)| (Some(i), op.id, op.seq + 1));
+        // A device of the same user revoked the owner before it handed the
+        // team over: the reign ends at the cut and the revoker is the owner
+        // from its revocation on. Not when the revoker is cut off itself by
+        // a revocation at or below that: then the team has no owner.
+        let revocation = order
+            .iter()
+            .enumerate()
+            // Not one from before this reign: the device came back since.
+            .filter(|(i, op)| applied.contains(&op.id) && since.is_none_or(|since| *i > since))
+            .filter_map(|(i, op)| {
+                let (member, cut) = revoked(op)?;
+                (member == device).then_some((cut, i, *op))
+            })
+            .min_by_key(|(cut, i, _)| (*cut, *i))
+            .filter(|(cut, ..)| in_log.is_none_or(|(.., until)| *cut < until));
+        if let Some((cut, at, op)) = revocation
+            && reigns.len() <= order.len()
+        {
+            reigns.push(Reign {
+                device,
+                since,
+                grant,
+                until: cut.min(fork(&device)),
+            });
+            let cut_off = order.iter().any(|other| {
+                applied.contains(&other.id)
+                    && revoked(other)
+                        .is_some_and(|(member, cut)| member == op.author && cut <= op.seq)
+            });
+            if !cut_off {
+                takes.insert(at);
+                next = Some((op.author, Some(at), Some((at, op.id))));
+            }
+            continue;
+        }
         let accepted = || {
             let named: BTreeSet<EntryId> = order
                 .iter()
@@ -649,7 +859,9 @@ pub fn resolve(team: TeamId, ops: &[Op], forks: &BTreeMap<DeviceId, u64>) -> Opt
             // owner and is written as the admin it is. An admin that forked
             // itself is passed over, unless it had claimed before: what a
             // device wrote before its fork stays.
-            let lines = admin_lines_of(&owner_effects(&reigns, &handovers, &accepts, &claims));
+            let lines = admin_lines_of(&owner_effects(
+                &reigns, &handovers, &accepts, &claims, &takes,
+            ));
             let claim_of = |successor: &DeviceId| {
                 order
                     .iter()
@@ -734,7 +946,7 @@ pub fn resolve(team: TeamId, ops: &[Op], forks: &BTreeMap<DeviceId, u64>) -> Opt
         .filter(|reign| reign.until == u64::MAX)
         .map(|reign| (reign.device, reign.grant.map(|(_, id)| id)));
     // 2. The owners' operations.
-    let mut effects = owner_effects(&reigns, &handovers, &accepts, &claims);
+    let mut effects = owner_effects(&reigns, &handovers, &accepts, &claims, &takes);
     let admin_lines = admin_lines_of(&effects);
     let mut on: BTreeMap<DeviceId, Vec<(usize, Option<Role>)>> = BTreeMap::new();
     for (i, effect) in &effects {
@@ -767,6 +979,7 @@ pub fn resolve(team: TeamId, ops: &[Op], forks: &BTreeMap<DeviceId, u64>) -> Opt
             _ => continue,
         };
         if effects.contains_key(&i)
+            || own.contains(&op.id)
             || member == op.author
             || !resolved.administers(op.author, op.seq, op.under)
             || (role.is_some() && left(i, &member))

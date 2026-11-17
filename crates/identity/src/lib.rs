@@ -15,9 +15,10 @@
 //! - [`certificate`]: the signatures that lead from the user key to a
 //!   device.
 //!
-//! In the log one member is still one device key, as in the p2panda spike:
-//! user keys and certificates exist beside it and the rules do not read
-//! them yet.
+//! In the log a member is a device. A device publishes its certificate
+//! chain, and the rules read from it which devices are one user's: those
+//! let each other in and take each other out ([`Replica::admit`],
+//! [`Replica::revoke`]).
 //!
 //! A device key must never be restored from a backup and used again: the
 //! restored device continues its log from an old position, which is a fork,

@@ -14,3 +14,15 @@ unsafe_code = "forbid"
 # globals. See docs/decisions.md (2026-11-13, #RUST-23).
 [patch.crates-io]
 smithay = { git = "https://github.com/Niach/smithay", rev = "3737b405a29bf14769d6e19961673d872eb87841" }
+
+# Curve arithmetic and hashing are some hundred times slower without
+# optimisation, and the tests of `identity` sign and verify many thousand
+# entries: without this its random test takes minutes in a debug build.
+[profile.dev.package.identity]
+opt-level = 2
+[profile.dev.package.curve25519-dalek]
+opt-level = 3
+[profile.dev.package.ed25519-dalek]
+opt-level = 3
+[profile.dev.package.sha2]
+opt-level = 3
