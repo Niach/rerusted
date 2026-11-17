@@ -45,6 +45,10 @@ fn act(
     let other = nodes[j].id();
     let role = if random.below(3) == 0 { Admin } else { Member };
     let node = &mut nodes[i];
+    // Whoever is the heir of a forked owner tends to take the team over.
+    if random.below(3) == 0 {
+        let _ = node.log.take_over(team);
+    }
     match random.below(19) {
         0..3 => {
             let _ = now(node
@@ -70,11 +74,7 @@ fn act(
             let _ = now(node.log.hand_over(team, other));
         }
         12 => {
-            if random.below(2) == 0 {
-                let _ = now(node.log.leave(team));
-            } else {
-                let _ = node.log.take_over(team);
-            }
+            let _ = now(node.log.leave(team));
         }
         // A backup of the device's disk, and the disk put back to it: what
         // the device writes then forks its log.
@@ -135,6 +135,26 @@ fn act(
     }
 }
 
+/// The device that is the owner in its own eyes writes, is put back to
+/// before that and writes something else: its log forks. Its neighbour
+/// holds the first branch.
+fn fork_owner(team: TeamId, nodes: &mut [Node]) {
+    let Some(i) = nodes.iter().position(|node| {
+        node.log
+            .team(team)
+            .is_some_and(|resolved| resolved.owner() == Some(node.id()))
+    }) else {
+        return;
+    };
+    let j = (i + 1) % nodes.len();
+    let backup = nodes[i].backup();
+    nodes[i].forge(Kind::Announce { sealing: [1; 32] });
+    let (left, right) = nodes.split_at_mut(i.max(j));
+    sync(&mut left[i.min(j)], &mut right[0]);
+    nodes[i].restore(&backup);
+    nodes[i].forge(Kind::Announce { sealing: [2; 32] });
+}
+
 /// The entries in another order: each device's log stays in order, the logs
 /// are interleaved at random.
 fn shuffled(random: &mut Random, entries: Vec<Entry>) -> Vec<Entry> {
@@ -169,6 +189,11 @@ fn run(seed: u64) -> (bool, bool, bool) {
     now(first[0].log.add_member(team, rest[2].id(), Member)).unwrap();
     let mut backups = NAMES.map(|_| None);
     for step in 0..60 {
+        // In every third run the owner of the moment forks, early enough
+        // for an heir to take the team over and to act as owner.
+        if seed.is_multiple_of(3) && step == 5 + (seed as usize / 3) % 30 {
+            fork_owner(team, &mut nodes);
+        }
         act(&mut random, team, &mut nodes, &mut backups, step);
     }
     {
@@ -316,6 +341,10 @@ fn replicas_agree_whatever_happened() {
     println!(
         "{forked} of {seeds} runs with a fork, {handed} with another owner at the end, \
          {claimed} with a take-over that counts"
+    );
+    assert!(
+        claimed > seeds as u32 / 40,
+        "the runs reach too few take-overs"
     );
     assert!(forked > seeds as u32 / 10 && handed > seeds as u32 / 20);
 }
