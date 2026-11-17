@@ -301,6 +301,16 @@ impl Replica {
                 let action = Action::Accept { handover: handed };
                 (team, (under, parents, action, None), Vec::new())
             }
+            Kind::Claim {
+                team,
+                under,
+                parents,
+                owner,
+            } => (
+                team,
+                (under, parents, Action::Claim { owner }, None),
+                Vec::new(),
+            ),
         };
         let (under, parents, action, new_key) = op;
         let state = self.teams.entry(team).or_default();
@@ -614,6 +624,26 @@ impl Replica {
             handover: handover.bytes.clone(),
         };
         vec![self.append(kind)]
+    }
+
+    /// Takes over a team whose owner forked. Only the admin that has been
+    /// one for the longest may: [`Team::heir`] names it.
+    pub fn take_over(&mut self, team: TeamId) -> Result<Vec<Entry>, Error> {
+        self.ready()?;
+        let resolved = self.resolved(team)?;
+        let Some((owner, heir)) = resolved.heir() else {
+            return Err(Error::NotAllowed);
+        };
+        if heir != self.device {
+            return Err(Error::NotAllowed);
+        }
+        let kind = Kind::Claim {
+            team,
+            under: self.admin_grant(team)?,
+            parents: resolved.parents().to_vec(),
+            owner,
+        };
+        Ok(vec![self.append(kind)])
     }
 
     /// What this device names as `under` in an operation on members.
