@@ -46,8 +46,11 @@ impl Drop for Child {
 #[test]
 #[ignore = "needs the gpui-shell binary, see the top of this file"]
 fn a_gpui_window_a_gpui_panel_and_a_gpui_overlay_are_ordinary_clients() {
+    // Cargo runs a test in its crate's directory, so a relative path is taken from the
+    // workspace root, where the command at the top of this file is typed.
     let binary = std::env::var_os("GPUI_SHELL").expect("GPUI_SHELL names the gpui-shell binary");
-    let binary = std::fs::canonicalize(binary).expect("GPUI_SHELL exists");
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let binary = std::fs::canonicalize(root.join(binary)).expect("GPUI_SHELL exists");
     let rig = Rig::start();
     let person = rig.handle.person();
     let frames = person.frames(0).unwrap();
