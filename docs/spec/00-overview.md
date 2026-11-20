@@ -84,7 +84,7 @@ Not specs: what was learned elsewhere, as numbered rules a design is checked aga
 
 | Lessons | Issue | File |
 |---|---|---|
-| Computer use and Voice in eDE (Exponential Desktop): each mistake, why it happened, the rule (L-01 to L-61) | #EDE-118, #EDE-69 | [../lessons/ede-computer-use-and-voice.md](../lessons/ede-computer-use-and-voice.md) |
+| Computer use and Voice in eDE (Exponential Desktop): each mistake, why it happened, the rule (L-01 to L-85: the first review, then the agent spaces core, the real runs and the call seal) | #EDE-118, #EDE-69 | [../lessons/ede-computer-use-and-voice.md](../lessons/ede-computer-use-and-voice.md) |
 
 ## Phases
 
